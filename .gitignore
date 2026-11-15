@@ -23,3 +23,7 @@ __pycache__/
 
 # 临时 A/B 产物
 tools/out-*/
+
+# 模型文件（1.22GB，绝不入库；App 内下载或文件 App 导入）
+*.gguf
+

@@ -7,8 +7,10 @@
 //  设计要点：
 //  * 所有可变状态只在主线程（@MainActor）改，ASR 事件、推理结果一律回主线程再写；
 //  * 推理放 Task.detached，主线程只负责状态迁移，避免卡界面；
-//  * 自动模式同时跑 zh / en 两个识别器，final 先攒在 pendingFinals 里，
-//    静默 700ms 后只挑一条去翻译（避免重复翻译同一句话）；
+//  * 自动模式默认只跑中文识别器（中英混说时英文词也能被中文识别器捕捉，实测更稳）；
+//    只有打开实验开关 dualRecognizer 才同时跑 zh / en 两路。两路时 final 先攒着，
+//    尽量等两路到齐（或距第一条 final 1200ms）再配对：只挑一条翻译，另一条整条丢弃，
+//    避免英文识别器对中文音频的幻觉被翻译；
 //  * 翻译队列丢最旧保最新，最多 3 条。
 //
 
@@ -31,6 +33,8 @@ private struct TranslationOutput: Sendable {
     let metrics: String
     let latencyMS: Int
     let generation: Int
+    /// 这条译文对应的原文（用于「上一句」搬移与诊断）
+    let sourceText: String
 }
 
 /// 模型加载结果（全部是 Sendable 值）。
@@ -60,6 +64,18 @@ final class AppModel: ObservableObject {
     @Published var downloadProgress: Double = 0
     @Published var lastLatencyMS: Int = 0
 
+    /// 实验开关：自动模式同时跑中英双识别器（默认关；单中文识别器实测更好）
+    @Published var dualRecognizer: Bool = false
+    /// 当前识别引擎名（SpeechAnalyzer / SFSpeechRecognizer（降级）），来自 ASRFactory
+    @Published var asrEngineName: String = ""
+
+    /// 当前这句译文的原文（上一句搬移时用到；界面在非聆听时显示它）
+    @Published var sourceText: String = ""
+    /// 上一句译文（连续字幕：上方小一号灰色）
+    @Published var previousTranslation: String = ""
+    /// 上一句原文（连续字幕：上方更小一号灰色）
+    @Published var previousSource: String = ""
+
     // 过程状态（界面用于隐藏/显示加载卡片与“翻译中”指示）
     @Published var isLoadingModel: Bool = true
     @Published var isTranslating: Bool = false
@@ -72,11 +88,21 @@ final class AppModel: ObservableObject {
     /// 已经定稿的转写文本；实时 partial 拼在它后面显示
     private var finalizedTranscript: String = ""
 
-    /// 自动模式下等待配对的 final
-    private var pendingFinals: [(localeID: String, text: String)] = []
+    /// 自动模式配对：localeID -> 该识别器给出的 final（每路保留一条）
+    private var pendingFinals: [String: String] = [:]
+    /// 本批第一条 final 的到达时间；flushDeadline 由此 +1.2s 得出，不随新 final 重置
+    private var pendingFirstArrival: Date?
+    /// 本批配对的截止时间（两路没到齐时到点强制 flush）
+    private var flushDeadline: Date?
     private var flushScheduled: Bool = false
     private var flushTask: Task<Void, Never>?
     private var flushToken: Int = 0
+    /// 本次聆听实际启动的识别器 locale（只有 1 路时不需要等另一路）
+    private var activeLocaleIDs: Set<String> = []
+    /// 状态栏临时提示（丢弃幻觉等）的 token，防止旧提示的清空任务串台
+    private var statusNoticeToken: Int = 0
+    /// 临时提示预计消失的时间；翻译完成时不要用「就绪」提前盖掉提示
+    private var statusNoticeUntil: Date?
 
     /// 翻译任务。数组只放“排队中”的任务，正在跑的那条在 pump 里被取走。
     private static let maxQueuedJobs: Int = 3
@@ -237,26 +263,37 @@ final class AppModel: ObservableObject {
         finalizedTranscript = ""
         transcript = ""
         pendingFinals.removeAll()
+        pendingFirstArrival = nil
+        flushDeadline = nil
         flushTask?.cancel()
         flushTask = nil
         flushScheduled = false
         flushToken += 1
+        statusNoticeToken += 1
+        statusNoticeUntil = nil
         errorMessage = ""
 
         // 优先 iOS 26 的 SpeechAnalyzer；硬件/资源不支持时自动降级到 SFSpeechRecognizer（设备端）
         let factoryResult: (engine: any ASREngine, name: String) = ASRFactory.make()
         asr = factoryResult.engine
+        asrEngineName = factoryResult.name
 
         guard let engine = asr else {
             errorMessage = "语音识别组件初始化失败。"
             return
         }
 
+        // 自动模式：默认只跑中文识别器（中英混说时英文词也能被它捕捉，实测比双路更稳）；
+        // 只有打开 dualRecognizer 实验开关后才同时跑 zh + en 两路。
         var localeIDs: [String] = inputMode.localeIDs
+        if inputMode == .auto && !dualRecognizer {
+            localeIDs = [SpeechLanguage.chinese.localeID]
+        }
         if factoryResult.name.contains("降级") && localeIDs.count > 1 {
             // 降级后端只有一路识别，自动模式退化为默认中文（英文词仍能被中文识别器捕捉）
             localeIDs = [localeIDs[0]]
         }
+        activeLocaleIDs = Set(localeIDs)
         sessionToken += 1
         let token: Int = sessionToken
         statusText = "正在启动语音识别…"
@@ -270,7 +307,7 @@ final class AppModel: ObservableObject {
             }
             isListening = true
             level = 0
-            statusText = "聆听中…（" + factoryResult.name + "）"
+            statusText = "聆听中…（" + asrEngineName + "）"
             UIApplication.shared.isIdleTimerDisabled = true
         } catch {
             asr = nil
@@ -291,16 +328,18 @@ final class AppModel: ObservableObject {
         isListening = false
         level = 0
         UIApplication.shared.isIdleTimerDisabled = false
-
-        // 自动模式下把还没配对的 final 补翻译掉
-        if inputMode == .auto {
-            flushFinals()
-        }
+        statusNoticeToken += 1
+        statusNoticeUntil = nil
 
         if isTranslating {
             statusText = "翻译中…"
         } else {
             statusText = isModelReady ? "就绪" : statusText
+        }
+
+        // 自动模式下把还没配对的 final 补翻译掉（可能在这里再显示“已丢弃…”提示）
+        if inputMode == .auto {
+            flushFinals()
         }
     }
 
@@ -335,31 +374,56 @@ final class AppModel: ObservableObject {
         let trimmed: String = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
 
-        if finalizedTranscript.isEmpty {
-            finalizedTranscript = trimmed
-        } else {
-            finalizedTranscript += " " + trimmed
-        }
-        transcript = finalizedTranscript
-
         if inputMode == .auto {
-            pendingFinals.append((localeID: localeID, text: trimmed))
-            scheduleFlushIfNeeded()
+            // 同一路识别器在上一批还没配对完又来了一条：先把上一批 flush 掉，
+            // 避免待配对那句被新的一句覆盖丢失。
+            if pendingFinals[localeID] != nil {
+                flushFinals()
+            }
+
+            // 自动模式：先攒起来配对，不要立刻进原文区 / 翻译队列
+            if pendingFinals.isEmpty || flushDeadline == nil {
+                let now: Date = Date()
+                if pendingFirstArrival == nil {
+                    pendingFirstArrival = now
+                }
+                if flushDeadline == nil {
+                    let firstArrival: Date = pendingFirstArrival ?? now
+                    flushDeadline = firstArrival.addingTimeInterval(AppModel.pairingWindowSeconds)
+                }
+            }
+            pendingFinals[localeID] = trimmed
+
+            let pendingLocales: Set<String> = Set(pendingFinals.keys)
+            if activeLocaleIDs.count <= 1 || activeLocaleIDs.isSubset(of: pendingLocales) {
+                // 只有一路识别器（默认）或两路都到齐 → 不需要再等
+                flushFinals()
+            } else {
+                scheduleFlushAtDeadline()
+            }
         } else {
-            let source: SpeechLanguage = SpeechLanguage.from(localeID: localeID)
+            // 手动模式：不配对，直接追加原文并翻译
+            let source: SpeechLanguage = SpeechLanguage.detect(from: trimmed)
+            appendFinalToTranscript(trimmed, source: source)
             enqueue(text: trimmed, source: source)
         }
     }
 
-    /// 700ms 内没有新的 final，就把攒下的 final 配对成一句去翻译。
-    /// 只在第一条 final 时排一次，后续 final 不会重置计时。
-    private func scheduleFlushIfNeeded() {
+    /// 两路识别器时等待另一路 final 的窗口；到点还没到齐就强制 flush。
+    private static let pairingWindowSeconds: TimeInterval = 1.2
+
+    /// 两路还没到齐时，按本批 flushDeadline 排一次定时 flush。
+    /// flushDeadline 由本批第一条 final 决定，后续 final 不会重置它。
+    private func scheduleFlushAtDeadline() {
         guard !flushScheduled else { return }
         flushScheduled = true
         flushToken += 1
         let token: Int = flushToken
+        let deadline: Date = flushDeadline ?? Date().addingTimeInterval(AppModel.pairingWindowSeconds)
+        let interval: TimeInterval = max(0.0, deadline.timeIntervalSinceNow)
+        let nanos: UInt64 = UInt64(interval * 1_000_000_000.0)
         flushTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: 700_000_000)
+            try? await Task.sleep(nanoseconds: nanos)
             guard let self = self else { return }
             guard !Task.isCancelled else { return }
             guard token == self.flushToken else { return }
@@ -367,35 +431,40 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// 自动模式配对：从 pendingFinals 里挑一条，其余整条丢弃（不进原文区、也不翻译）。
     private func flushFinals() {
         flushScheduled = false
         flushToken += 1
         flushTask?.cancel()
         flushTask = nil
+        pendingFirstArrival = nil
+        flushDeadline = nil
 
-        guard !pendingFinals.isEmpty else { return }
+        let entries: [String: String] = pendingFinals
+        pendingFinals.removeAll()
+        guard !entries.isEmpty else { return }
 
         var chosenLocaleID: String?
         var chosenText: String?
 
         // 1) 中文识别器且文本里确实有汉字 → 选它
-        for entry in pendingFinals.reversed() {
-            if SpeechLanguage.from(localeID: entry.localeID) == .chinese,
-               AppModel.containsHan(entry.text) {
-                chosenLocaleID = entry.localeID
-                chosenText = entry.text
+        for (localeID, text) in entries {
+            if SpeechLanguage.from(localeID: localeID) == .chinese,
+               AppModel.containsHan(text) {
+                chosenLocaleID = localeID
+                chosenText = text
                 break
             }
         }
 
         // 2) 英文识别器、含拉丁字母且没有汉字 → 选它
         if chosenText == nil {
-            for entry in pendingFinals.reversed() {
-                if SpeechLanguage.from(localeID: entry.localeID) == .english,
-                   AppModel.containsLatinLetter(entry.text),
-                   !AppModel.containsHan(entry.text) {
-                    chosenLocaleID = entry.localeID
-                    chosenText = entry.text
+            for (localeID, text) in entries {
+                if SpeechLanguage.from(localeID: localeID) == .english,
+                   AppModel.containsLatinLetter(text),
+                   !AppModel.containsHan(text) {
+                    chosenLocaleID = localeID
+                    chosenText = text
                     break
                 }
             }
@@ -404,9 +473,9 @@ final class AppModel: ObservableObject {
         // 3) 都不满足 → 取最长的一条
         if chosenText == nil {
             var longest: (localeID: String, text: String)?
-            for entry in pendingFinals {
-                if longest == nil || entry.text.count > (longest?.text.count ?? 0) {
-                    longest = entry
+            for (localeID, text) in entries {
+                if longest == nil || text.count > (longest?.text.count ?? 0) {
+                    longest = (localeID: localeID, text: text)
                 }
             }
             if let best = longest {
@@ -415,16 +484,91 @@ final class AppModel: ObservableObject {
             }
         }
 
-        pendingFinals.removeAll()
+        // 未选中的识别器结果整条丢弃，并在状态栏留一句可诊断的痕迹
+        var discardNotice: String?
+        for (localeID, text) in entries {
+            if let chosen = chosenLocaleID, localeID == chosen { continue }
+            let isChinesePath: Bool = SpeechLanguage.from(localeID: localeID) == .chinese
+            let kind: String = isChinesePath ? "中文识别结果" : "英文幻觉"
+            let preview: String = String(text.prefix(20)).replacingOccurrences(of: "\n", with: " ")
+            if discardNotice == nil {
+                discardNotice = "已丢弃" + kind + "：" + preview
+            }
+        }
 
         guard let text = chosenText, !text.isEmpty else { return }
-        let source: SpeechLanguage
-        if let localeID = chosenLocaleID {
-            source = SpeechLanguage.from(localeID: localeID)
-        } else {
-            source = SpeechLanguage.detect(from: text)
-        }
+
+        // 源语言以选中文本本身判定（中文识别器路径里也可能是一整句英文）
+        let source: SpeechLanguage = SpeechLanguage.detect(from: text)
+        appendFinalToTranscript(text, source: source)
         enqueue(text: text, source: source)
+
+        if let notice = discardNotice {
+            showStatusNotice(notice)
+        }
+    }
+
+    /// 把定稿文本追加到原文区。英文片段之间 / 中英边界补空格，避免粘连。
+    private func appendFinalToTranscript(_ text: String, source: SpeechLanguage) {
+        let trimmed: String = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+
+        if finalizedTranscript.isEmpty {
+            finalizedTranscript = trimmed
+        } else {
+            var needsSpace: Bool = false
+            if source == .english {
+                needsSpace = true
+            } else if let lastScalar = finalizedTranscript.unicodeScalars.last,
+                      AppModel.isLatinLetter(lastScalar) {
+                needsSpace = true
+            }
+            finalizedTranscript += (needsSpace ? " " : "") + trimmed
+        }
+        transcript = finalizedTranscript
+    }
+
+    /// 状态栏临时提示（如“已丢弃英文幻觉：…”），duration 秒后恢复常规状态文字。
+    private func showStatusNotice(_ text: String, duration: TimeInterval = 3.0) {
+        statusNoticeToken += 1
+        let token: Int = statusNoticeToken
+        statusNoticeUntil = Date().addingTimeInterval(duration)
+        statusText = text
+        let nanos: UInt64 = UInt64(duration * 1_000_000_000.0)
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: nanos)
+            guard let self = self else { return }
+            guard !Task.isCancelled else { return }
+            guard token == self.statusNoticeToken else { return }
+            self.statusNoticeUntil = nil
+            self.statusText = self.restingStatusText()
+        }
+    }
+
+    /// 提示消失、或从「已自动切换为…」这类临时文案回落后，应恢复的状态文字。
+    private func restingStatusText() -> String {
+        if isListening {
+            if asrEngineName.isEmpty {
+                return "聆听中…"
+            }
+            return "聆听中…（" + asrEngineName + "）"
+        }
+        if isTranslating {
+            return "翻译中…"
+        }
+        if isModelReady {
+            return "就绪"
+        }
+        return statusText
+    }
+
+    private static func isLatinLetter(_ scalar: Unicode.Scalar) -> Bool {
+        switch scalar.value {
+        case 0x41...0x5A, 0x61...0x7A:
+            return true
+        default:
+            return false
+        }
     }
 
     private static func containsHan(_ text: String) -> Bool {
@@ -435,13 +579,8 @@ final class AppModel: ObservableObject {
     }
 
     private static func containsLatinLetter(_ text: String) -> Bool {
-        for scalar in text.unicodeScalars {
-            switch scalar.value {
-            case 0x41...0x5A, 0x61...0x7A:
-                return true
-            default:
-                continue
-            }
+        for scalar in text.unicodeScalars where AppModel.isLatinLetter(scalar) {
+            return true
         }
         return false
     }
@@ -485,6 +624,7 @@ final class AppModel: ObservableObject {
 
         let translator: LlamaTranslator = self.translator
         let prompt: String = PromptBuilder.full(text: job.text, source: job.source, target: job.target)
+        let jobSourceText: String = job.text
         let maxTokens: Int32 = 192
 
         let task: Task<TranslationOutput, Error> = Task.detached {
@@ -496,14 +636,21 @@ final class AppModel: ObservableObject {
             return TranslationOutput(text: cleaned,
                                      metrics: summary,
                                      latencyMS: latency,
-                                     generation: currentGeneration)
+                                     generation: currentGeneration,
+                                     sourceText: jobSourceText)
         }
 
         Task { @MainActor in
             do {
                 let result: TranslationOutput = try await task.value
                 if result.generation == self.generation {
+                    // 连续字幕：先把当前这句搬到「上一句」，再落新的
+                    if !self.translation.isEmpty {
+                        self.previousTranslation = self.translation
+                        self.previousSource = self.sourceText
+                    }
                     self.translation = result.text
+                    self.sourceText = result.sourceText
                     self.metrics = result.metrics
                     self.lastLatencyMS = result.latencyMS
                 }
@@ -515,7 +662,9 @@ final class AppModel: ObservableObject {
             self.isPumping = false
             self.isTranslating = false
             if !self.isListening, self.isModelReady {
-                self.statusText = "就绪"
+                if self.statusNoticeUntil == nil {
+                    self.statusText = "就绪"
+                }
             }
             self.pump()
         }
@@ -582,6 +731,8 @@ final class AppModel: ObservableObject {
         inputMode = mode
         if mode != .auto {
             pendingFinals.removeAll()
+            pendingFirstArrival = nil
+            flushDeadline = nil
             flushTask?.cancel()
             flushTask = nil
             flushScheduled = false
@@ -595,21 +746,50 @@ final class AppModel: ObservableObject {
 
     // MARK: - 其它
 
+    /// 「复制诊断」用的多行文本。
+    var diagnosticReport: String {
+        var lines: [String] = []
+        lines.append("模型：" + (modelName.isEmpty ? "未加载" : modelName))
+        lines.append("引擎：" + (asrEngineName.isEmpty ? "未启动" : asrEngineName))
+
+        let inputText: String
+        if inputMode == .auto {
+            inputText = dualRecognizer ? "自动（双识别器）" : "自动（单中文识别器）"
+        } else {
+            inputText = inputMode.title
+        }
+        lines.append("输入：" + inputText)
+        lines.append("输出：" + target.displayName)
+        lines.append("metrics：" + (metrics.isEmpty ? "暂无" : metrics))
+        lines.append("延迟：" + (lastLatencyMS > 0 ? String(lastLatencyMS) + " ms" : "暂无"))
+        lines.append("错误：" + (errorMessage.isEmpty ? "无" : errorMessage))
+        lines.append("支持语言：" + (supportedLocalesText.isEmpty ? "暂无" : supportedLocalesText))
+        lines.append("状态：" + statusText)
+        return lines.joined(separator: "\n")
+    }
+
     func clearAll() {
         generation += 1
         translation = ""
         transcript = ""
         finalizedTranscript = ""
+        sourceText = ""
+        previousTranslation = ""
+        previousSource = ""
         metrics = ""
         lastLatencyMS = 0
         level = 0
         errorMessage = ""
         isTranslating = false
         pendingFinals.removeAll()
+        pendingFirstArrival = nil
+        flushDeadline = nil
         flushTask?.cancel()
         flushTask = nil
         flushScheduled = false
         flushToken += 1
+        statusNoticeToken += 1
+        statusNoticeUntil = nil
         jobs.removeAll()
     }
 

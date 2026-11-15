@@ -88,7 +88,9 @@ struct ContentView: View {
                     Text(model.statusText)
                         .font(.system(size: 14))
                         .foregroundStyle(Color.secondary)
-                        .lineLimit(1)
+                        .lineLimit(2)
+                        .minimumScaleFactor(0.75)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
 
@@ -150,23 +152,48 @@ struct ContentView: View {
     private var translationArea: some View {
         VStack(alignment: .leading, spacing: 8) {
             ScrollView {
-                Text(translationDisplayText)
-                    .font(.system(size: 40, weight: .semibold))
-                    .minimumScaleFactor(0.5)
-                    .foregroundStyle(model.translation.isEmpty ? Color.secondary.opacity(0.55) : Color.primary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .textSelection(.enabled)
+                VStack(alignment: .leading, spacing: 10) {
+                    // 上一句译文：小一号、灰色
+                    if !model.previousTranslation.isEmpty {
+                        Text(model.previousTranslation)
+                            .font(.system(size: 28, weight: .regular))
+                            .foregroundStyle(Color.secondary)
+                            .lineLimit(2)
+                            .minimumScaleFactor(0.6)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .textSelection(.enabled)
+                    }
+
+                    // 上一句原文：更小一号、更淡；没有就完全不占位
+                    if !model.previousSource.isEmpty {
+                        Text(model.previousSource)
+                            .font(.system(size: 14))
+                            .foregroundStyle(Color.secondary.opacity(0.7))
+                            .lineLimit(1)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .textSelection(.enabled)
+                    }
+
+                    // 当前句译文：保持大字
+                    Text(translationDisplayText)
+                        .font(.system(size: 40, weight: .semibold))
+                        .minimumScaleFactor(0.5)
+                        .foregroundStyle(model.translation.isEmpty ? Color.secondary.opacity(0.55) : Color.primary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .textSelection(.enabled)
+
+                    // 当前句原文：18pt 灰色小字
+                    Text(currentSourceText)
+                        .font(.system(size: 18))
+                        .foregroundStyle(Color.secondary)
+                        .lineLimit(3)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .textSelection(.enabled)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
             .scrollIndicators(.hidden)
-            .frame(maxWidth: .infinity, minHeight: 90, maxHeight: 280, alignment: .topLeading)
-
-            Text(transcriptPreview)
-                .font(.system(size: 18))
-                .foregroundStyle(Color.secondary)
-                .lineLimit(3)
-                .frame(maxWidth: .infinity, alignment: .topLeading)
-                .frame(height: 70, alignment: .topLeading)
-                .textSelection(.enabled)
+            .frame(maxWidth: .infinity, minHeight: 90, maxHeight: 340, alignment: .topLeading)
 
             metricsRow
         }
@@ -192,6 +219,17 @@ struct ContentView: View {
             return text
         }
         return "…" + String(text.suffix(maxLength))
+    }
+
+    /// 当前句原文：聆听时显示实时转写，停下后显示刚翻译那句的原文。
+    private var currentSourceText: String {
+        if model.isListening {
+            return transcriptPreview
+        }
+        if !model.sourceText.isEmpty {
+            return model.sourceText
+        }
+        return transcriptPreview
     }
 
     private var metricsRow: some View {
@@ -460,6 +498,9 @@ private struct InfoSheet: View {
     @ObservedObject var model: AppModel
     @Environment(\.dismiss) private var dismiss
 
+    @State private var didCopyDiagnostics: Bool = false
+    @State private var copyToken: Int = 0
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
@@ -477,6 +518,9 @@ private struct InfoSheet: View {
                 infoBlock(title: "模型",
                           value: model.modelName.isEmpty ? "未加载" : model.modelName)
 
+                infoBlock(title: "识别引擎",
+                          value: model.asrEngineName.isEmpty ? "未启动" : model.asrEngineName)
+
                 infoBlock(title: "支持的语言（前 8 个）",
                           value: supportedLocalesPreview)
 
@@ -485,6 +529,19 @@ private struct InfoSheet: View {
 
                 infoBlock(title: "最近一次延迟",
                           value: model.lastLatencyMS > 0 ? "\(model.lastLatencyMS) ms" : "暂无")
+
+                Toggle(isOn: $model.dualRecognizer) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("自动模式双识别器（实验）")
+                            .font(.system(size: 16, weight: .medium))
+                            .foregroundStyle(Color.primary)
+                        Text("打开后「自动」会同时跑中/英两路识别并配对；默认关闭（只用中文识别器）。改动在下次开始聆听时生效。")
+                            .font(.system(size: 12))
+                            .foregroundStyle(Color.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .tint(Color.accentColor)
 
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Prompt 说明")
@@ -495,6 +552,28 @@ private struct InfoSheet: View {
                         .foregroundStyle(Color.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
+
+                Button {
+                    UIPasteboard.general.string = model.diagnosticReport
+                    didCopyDiagnostics = true
+                    copyToken += 1
+                    let token: Int = copyToken
+                    Task { @MainActor in
+                        try? await Task.sleep(nanoseconds: 1_500_000_000)
+                        guard token == copyToken else { return }
+                        didCopyDiagnostics = false
+                    }
+                } label: {
+                    Label(didCopyDiagnostics ? "已复制" : "复制诊断",
+                          systemImage: didCopyDiagnostics ? "checkmark.circle.fill" : "doc.on.doc")
+                        .font(.system(size: 16, weight: .medium))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                        .background(RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(didCopyDiagnostics ? Color.green.opacity(0.15) : Color(.systemGray6)))
+                        .foregroundStyle(didCopyDiagnostics ? Color.green : Color.primary)
+                }
+                .buttonStyle(.plain)
 
                 Divider()
 
