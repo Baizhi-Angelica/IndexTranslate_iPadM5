@@ -3,25 +3,54 @@
 //  IndexTranslate
 //
 //  GGUF 模型的定位 / 导入 / 下载。模型统一放在 App 沙盒的 Documents 根目录。
+//  Documents 里可以同时放多个 .gguf（Q4_K_M / Q8_0 ...）：
+//  默认用哪个由 UserDefaults 的 ITXSelectedModel 决定；没选就取体积最大的。
 //
 
 import Foundation
+
+// MARK: - 模型列表条目
+
+/// Documents 里的一个 GGUF 模型。
+struct ModelEntry: Identifiable, Equatable {
+    let url: URL
+    /// 文件名（lastPathComponent，也是 Documents 里的唯一名）
+    let name: String
+    let sizeBytes: Int64
+
+    var id: String { name }
+
+    /// 给界面显示的大小（一位小数 GB/MB）
+    var displaySize: String { ModelStore.humanSize(sizeBytes) }
+}
 
 enum ModelStore {
 
     // MARK: - 常量
 
-    /// 官方文件名（IndexTeam/Index-Translate-2B-GGUF 仓库）
+    /// 默认模型文件名（官方 Q4_K_M，下载回退用）
     static let modelFileName: String = "Index-Translate-2B.Q4_K_M.gguf"
 
     /// 兼容旧文件名：早前从 mobile 仓库下的是同名不同哈希（体积一样 1,251.4 MB，实测都能跑）
     static let legacyModelFileName: String = "Index-Translate-2B-Q4_K_M.gguf"
 
-    /// 默认下载地址：官方 IndexTeam 仓库的 Q4_K_M，走 hf-mirror（国内可达）
-    static let defaultDownloadURLString: String = "https://hf-mirror.com/IndexTeam/Index-Translate-2B-GGUF/resolve/main/Index-Translate-2B.Q4_K_M.gguf?download=true"
+    /// Q4_K_M（官方默认档，约 1.22 GB）
+    static let q4FileName: String = "Index-Translate-2B.Q4_K_M.gguf"
+    static let q4DownloadURLString: String = "https://hf-mirror.com/IndexTeam/Index-Translate-2B-GGUF/resolve/main/Index-Translate-2B.Q4_K_M.gguf?download=true"
+
+    /// Q8_0（官方高质量档，约 2 GB；M 系列实测延迟和 Q4 几乎一样，可直接当默认）
+    static let q8FileName: String = "Index-Translate-2B.Q8_0.gguf"
+    static let q8DownloadURLString: String = "https://hf-mirror.com/IndexTeam/Index-Translate-2B-GGUF/resolve/main/Index-Translate-2B.Q8_0.gguf?download=true"
 
     /// 官方直连（不走镜像），镜像不通时可在 App 里粘这个
     static let officialDownloadURLString: String = "https://huggingface.co/IndexTeam/Index-Translate-2B-GGUF/resolve/main/Index-Translate-2B.Q4_K_M.gguf?download=true"
+    static let officialQ8DownloadURLString: String = "https://huggingface.co/IndexTeam/Index-Translate-2B-GGUF/resolve/main/Index-Translate-2B.Q8_0.gguf?download=true"
+
+    /// 默认下载地址，保持等于 q4DownloadURLString
+    static let defaultDownloadURLString: String = "https://hf-mirror.com/IndexTeam/Index-Translate-2B-GGUF/resolve/main/Index-Translate-2B.Q4_K_M.gguf?download=true"
+
+    /// 用户选中的模型文件名存这个 key
+    private static let selectedModelDefaultsKey: String = "ITXSelectedModel"
 
     // MARK: - 位置
 
@@ -35,30 +64,22 @@ enum ModelStore {
         return home.appendingPathComponent("Documents", isDirectory: true)
     }
 
-    /// 找模型：Documents 下优先精确文件名，否则取体积最大的 *.gguf。
-    static func locateModel() -> URL? {
+    // MARK: - 多模型列表与选择
+
+    /// Documents 下所有 .gguf，按体积降序（同体积按文件名升序，保证顺序稳定）。
+    static func listModels() -> [ModelEntry] {
         let fileManager: FileManager = FileManager.default
         let directory: URL = documentsDirectory
-
-        let exactURL: URL = directory.appendingPathComponent(modelFileName, isDirectory: false)
-        if fileManager.fileExists(atPath: exactURL.path) {
-            return exactURL
-        }
-        // 旧版文件名（mobile 仓库）也认
-        let legacyURL: URL = directory.appendingPathComponent(legacyModelFileName, isDirectory: false)
-        if fileManager.fileExists(atPath: legacyURL.path) {
-            return legacyURL
-        }
 
         let keys: [URLResourceKey] = [.fileSizeKey, .isRegularFileKey]
         guard let entries: [URL] = try? fileManager.contentsOfDirectory(at: directory,
                                                                        includingPropertiesForKeys: keys,
                                                                        options: [.skipsHiddenFiles]) else {
-            return nil
+            return []
         }
 
-        var bestURL: URL?
-        var bestSize: Int64 = -1
+        var models: [ModelEntry] = []
+        models.reserveCapacity(entries.count)
         for entry: URL in entries {
             if entry.pathExtension.lowercased() != "gguf" {
                 continue
@@ -67,24 +88,68 @@ enum ModelStore {
             if values?.isRegularFile == false {
                 continue
             }
-            let fileSize: Int = values?.fileSize ?? 0
-            let size: Int64 = Int64(fileSize)
-            if size > bestSize {
-                bestSize = size
-                bestURL = entry
+            let fileSize: Int64 = Int64(values?.fileSize ?? 0)
+            models.append(ModelEntry(url: entry,
+                                     name: entry.lastPathComponent,
+                                     sizeBytes: fileSize))
+        }
+
+        models.sort { (lhs: ModelEntry, rhs: ModelEntry) -> Bool in
+            if lhs.sizeBytes != rhs.sizeBytes {
+                return lhs.sizeBytes > rhs.sizeBytes
+            }
+            return lhs.name < rhs.name
+        }
+        return models
+    }
+
+    /// 用户选中的模型文件名（UserDefaults key "ITXSelectedModel"，空串视为未选）。
+    static func selectedModelName() -> String? {
+        let stored: String? = UserDefaults.standard.string(forKey: selectedModelDefaultsKey)
+        guard let name: String = stored else {
+            return nil
+        }
+        if name.isEmpty {
+            return nil
+        }
+        return name
+    }
+
+    /// 记住用户选中的模型文件名。
+    static func selectModel(name: String) {
+        UserDefaults.standard.set(name, forKey: selectedModelDefaultsKey)
+    }
+
+    /// 找模型：有选中且文件仍在 → 它；否则 → 体积最大的 .gguf；再否则 nil。
+    static func locateModel() -> URL? {
+        let fileManager: FileManager = FileManager.default
+        let directory: URL = documentsDirectory
+
+        // 1) 用户选中的模型（文件被删了就忽略，走回退）
+        if let selectedName: String = selectedModelName() {
+            let selectedURL: URL = directory.appendingPathComponent(selectedName, isDirectory: false)
+            if fileManager.fileExists(atPath: selectedURL.path) {
+                return selectedURL
             }
         }
-        return bestURL
+
+        // 2) 回退：体积最大的 .gguf（Q8 比 Q4 大，用户放进 Q8 后自然成为默认）
+        if let largest: ModelEntry = listModels().first {
+            return largest.url
+        }
+
+        return nil
     }
 
     // MARK: - 导入
 
-    /// 从文件选择器拿到的 URL 导入模型：拷贝到 Documents，同名文件先删除。
-    /// 返回 Documents 里的新 URL。
+    /// 从文件选择器拿到的 URL 导入模型：保留源文件名（只做清洗），拷贝到 Documents，
+    /// 同名文件先删除。返回 Documents 里的新 URL。
     static func importModel(from source: URL) throws -> URL {
         let fileManager: FileManager = FileManager.default
         let directory: URL = documentsDirectory
-        let destination: URL = directory.appendingPathComponent(modelFileName, isDirectory: false)
+        let fileName: String = sanitizedModelFileName(from: source.lastPathComponent)
+        let destination: URL = directory.appendingPathComponent(fileName, isDirectory: false)
 
         if source.standardizedFileURL == destination.standardizedFileURL {
             return destination
@@ -109,7 +174,9 @@ enum ModelStore {
 
     // MARK: - 下载
 
-    /// 下载模型（URLSession async 版 + 进度回调），完成后替换 Documents 里的同名文件。
+    /// 下载模型（URLSession async 版 + 进度回调）。
+    /// 目标文件名从 URL 的 lastPathComponent 推导（忽略 ?download=true 这类 query），
+    /// 完成后替换 Documents 里的同名文件，并自动选中这个模型。
     /// 失败抛 domain 为 "ITXModelStore" 的中文 NSError。
     static func downloadModel(from urlString: String,
                               progress: @escaping @Sendable (Double) -> Void) async throws -> URL {
@@ -118,6 +185,10 @@ enum ModelStore {
               scheme == "https" || scheme == "http" else {
             throw modelError("下载地址无效")
         }
+
+        // URL.path 不含 query，所以 ?download=true 不会混进文件名。
+        let rawName: String = url.lastPathComponent
+        let fileName: String = rawName.isEmpty ? modelFileName : sanitizedModelFileName(from: rawName)
 
         let delegate: ProgressDelegate = ProgressDelegate(progress: progress)
 
@@ -138,7 +209,7 @@ enum ModelStore {
 
         let fileManager: FileManager = FileManager.default
         let directory: URL = documentsDirectory
-        let destination: URL = directory.appendingPathComponent(modelFileName, isDirectory: false)
+        let destination: URL = directory.appendingPathComponent(fileName, isDirectory: false)
 
         do {
             if !fileManager.fileExists(atPath: directory.path) {
@@ -158,6 +229,8 @@ enum ModelStore {
             throw modelError("模型文件保存失败：\(error.localizedDescription)")
         }
 
+        // 下载完成自动把新文件设为选中，App 重新 locate 时就直接用它。
+        selectModel(name: fileName)
         progress(1.0)
         return destination
     }
@@ -176,6 +249,36 @@ enum ModelStore {
     }
 
     // MARK: - 内部
+
+    /// 文件名清洗：去掉路径分隔符，只保留 [A-Za-z0-9._ -]，其余替换成 "_"；
+    /// 清理后没有有效名字就用 "model"；后缀不是 .gguf 时补 ".gguf"。
+    private static func sanitizedModelFileName(from proposedName: String) -> String {
+        var name: String = proposedName
+
+        // 1) 去掉路径分隔符（正常来自 lastPathComponent，这里再兜一层）
+        name = name.replacingOccurrences(of: "/", with: "")
+        name = name.replacingOccurrences(of: "\\", with: "")
+
+        // 2) 非 [A-Za-z0-9._ -] 的字符替换成 "_"
+        name = name.replacingOccurrences(of: "[^A-Za-z0-9._ -]",
+                                         with: "_",
+                                         options: .regularExpression)
+
+        // 3) 去首尾空白
+        name = name.trimmingCharacters(in: .whitespaces)
+
+        // 4) 空名 / 只剩点号、下划线、空格 → 用 "model" 兜底
+        let stem: String = name.trimmingCharacters(in: CharacterSet(charactersIn: ". _"))
+        if stem.isEmpty {
+            name = "model"
+        }
+
+        // 5) 后缀不是 .gguf → 补上
+        if !name.lowercased().hasSuffix(".gguf") {
+            name = name + ".gguf"
+        }
+        return name
+    }
 
     private static func modelError(_ message: String, code: Int = -1) -> NSError {
         return NSError(domain: "ITXModelStore",

@@ -35,6 +35,21 @@ private struct TranslationOutput: Sendable {
     let generation: Int
     /// 这条译文对应的原文（用于「上一句」搬移与诊断）
     let sourceText: String
+    /// 清理后是否还有实际内容（纯标点/符号/空白 → false，结果整条丢弃）
+    let isMeaningful: Bool
+}
+
+/// 是否包含有意义文本：去掉首尾空白，再移除标点与符号后仍非空。
+/// 纯标点（「。」「、」「…」）、纯符号、纯空白都算无意义。
+private func itxHasMeaningfulText(_ text: String) -> Bool {
+    let trimmed: String = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    if trimmed.isEmpty {
+        return false
+    }
+    let stripped: String = trimmed
+        .components(separatedBy: CharacterSet.punctuationCharacters.union(CharacterSet.symbols))
+        .joined()
+    return !stripped.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
 }
 
 /// 模型加载结果（全部是 Sendable 值）。
@@ -68,6 +83,11 @@ final class AppModel: ObservableObject {
     @Published var dualRecognizer: Bool = false
     /// 当前识别引擎名（SpeechAnalyzer / SFSpeechRecognizer（降级）），来自 ASRFactory
     @Published var asrEngineName: String = ""
+
+    /// Documents 里可用的 .gguf 模型列表（ⓘ 面板里切换）
+    @Published var models: [ModelEntry] = []
+    /// 当前选中/正在使用的模型文件名
+    @Published var currentModelName: String = ""
 
     /// 当前这句译文的原文（上一句搬移时用到）
     @Published var sourceText: String = ""
@@ -120,6 +140,9 @@ final class AppModel: ObservableObject {
     private var generation: Int = 0
     private var isLoadingTask: Bool = false
     private var isStartingListening: Bool = false
+    private var isSwitchingModel: Bool = false
+    /// 当前加载的模型文件名（用于 refreshModels 判断选中项）
+    private var loadedModelFileName: String = ""
     /// 每次开始聆听自增，用来丢弃上一次会话迟到的 ASR 事件
     private var sessionToken: Int = 0
 
@@ -130,6 +153,7 @@ final class AppModel: ObservableObject {
         // 启动时先弹一次系统麦克风授权；真正点“开始聆听”时还会再校验一次
         _ = await AppModel.requestMicPermission()
 
+        refreshModels()
         loadModelIfNeeded()
         supportedLocalesText = await AppModel.loadSupportedLocalesText()
     }
@@ -141,7 +165,9 @@ final class AppModel: ObservableObject {
         guard let modelURL = ModelStore.locateModel() else {
             isLoadingModel = false
             isModelReady = false
+            loadedModelFileName = ""
             statusText = "未找到模型，请下载或导入"
+            refreshModels()
             return
         }
 
@@ -150,6 +176,7 @@ final class AppModel: ObservableObject {
         statusText = "正在加载模型…"
 
         let path: String = modelURL.path
+        let fileName: String = modelURL.lastPathComponent
         let translator: LlamaTranslator = self.translator
         let currentGeneration: Int = generation
 
@@ -172,6 +199,10 @@ final class AppModel: ObservableObject {
                 self.isLoadingTask = false
                 self.isLoadingModel = false
                 if info.isLoaded {
+                    self.loadedModelFileName = fileName
+                    // 优先用户选中的模型名（下载/切换都会写 UserDefaults），否则用刚找到的文件名
+                    self.currentModelName = ModelStore.selectedModelName() ?? fileName
+                    self.refreshModels()
                     self.errorMessage = ""
                     self.statusText = "就绪"
                 } else {
@@ -193,9 +224,53 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// 重新扫描 Documents 里的 .gguf 列表，并同步「当前选中的模型名」。
+    func refreshModels() {
+        models = ModelStore.listModels()
+        let names: Set<String> = Set(models.map { $0.name })
+        if let selected = ModelStore.selectedModelName(), names.contains(selected) {
+            currentModelName = selected
+        } else if !loadedModelFileName.isEmpty, names.contains(loadedModelFileName) {
+            currentModelName = loadedModelFileName
+        } else if let first = models.first {
+            currentModelName = first.name
+        } else {
+            currentModelName = ""
+        }
+    }
+
+    /// 切换当前模型：卸载旧模型 → 选中新文件 → 重新加载。
+    /// 切换期间 statusText 显示「正在加载模型…」，加载完成由 loadModelIfNeeded 更新。
+    func switchModel(to name: String) {
+        guard !name.isEmpty, !isSwitchingModel, !isLoadingTask, !isDownloading, !isListening else { return }
+        if name == currentModelName, isModelReady {
+            return
+        }
+        isSwitchingModel = true
+        isModelReady = false
+        isLoadingModel = true
+        errorMessage = ""
+        statusText = "正在加载模型…"
+        currentModelName = name
+        generation += 1
+        jobs.removeAll()
+        ModelStore.selectModel(name: name)
+
+        let translator: LlamaTranslator = self.translator
+        Task { @MainActor in
+            let unloadTask: Task<Void, Never> = Task.detached {
+                translator.unload()
+            }
+            await unloadTask.value
+            self.isSwitchingModel = false
+            self.loadModelIfNeeded()
+        }
+    }
+
     /// 用户把 .gguf 放进 Documents 之后手动重新扫描。
     func rescanModel() {
         guard !isModelReady, !isLoadingTask else { return }
+        refreshModels()
         isLoadingModel = true
         loadModelIfNeeded()
     }
@@ -361,8 +436,8 @@ final class AppModel: ObservableObject {
             var combined: String = finalizedTranscript
             let trimmed: String = text.trimmingCharacters(in: .whitespacesAndNewlines)
             if !trimmed.isEmpty {
-                // 实时 partial 只进「正在听」区，不占「当前句原文」的位置
-                livePartial = trimmed
+                // 实时 partial 只进「正在听」区，不占「当前句原文」的位置；纯标点不显示
+                livePartial = itxHasMeaningfulText(trimmed) ? trimmed : ""
                 if !combined.isEmpty {
                     combined += " "
                 }
@@ -419,7 +494,11 @@ final class AppModel: ObservableObject {
                 scheduleFlushAtDeadline()
             }
         } else {
-            // 手动模式：不配对，直接追加原文并翻译
+            // 手动模式：不配对，直接追加原文并翻译；纯标点/符号句直接丢弃
+            guard itxHasMeaningfulText(trimmed) else {
+                livePartial = ""
+                return
+            }
             let source: SpeechLanguage = SpeechLanguage.detect(from: trimmed)
             currentSource = trimmed
             livePartial = ""
@@ -463,11 +542,18 @@ final class AppModel: ObservableObject {
         pendingFinals.removeAll()
         guard !entries.isEmpty else { return }
 
+        // 选中前先过滤：纯标点/符号/空白句整句丢弃（不翻译、不更新原文）
+        let meaningfulEntries: [String: String] = entries.filter { itxHasMeaningfulText($0.value) }
+        guard !meaningfulEntries.isEmpty else {
+            livePartial = ""
+            return
+        }
+
         var chosenLocaleID: String?
         var chosenText: String?
 
         // 1) 中文识别器且文本里确实有汉字 → 选它
-        for (localeID, text) in entries {
+        for (localeID, text) in meaningfulEntries {
             if SpeechLanguage.from(localeID: localeID) == .chinese,
                AppModel.containsHan(text) {
                 chosenLocaleID = localeID
@@ -478,7 +564,7 @@ final class AppModel: ObservableObject {
 
         // 2) 英文识别器、含拉丁字母且没有汉字 → 选它
         if chosenText == nil {
-            for (localeID, text) in entries {
+            for (localeID, text) in meaningfulEntries {
                 if SpeechLanguage.from(localeID: localeID) == .english,
                    AppModel.containsLatinLetter(text),
                    !AppModel.containsHan(text) {
@@ -492,7 +578,7 @@ final class AppModel: ObservableObject {
         // 3) 都不满足 → 取最长的一条
         if chosenText == nil {
             var longest: (localeID: String, text: String)?
-            for (localeID, text) in entries {
+            for (localeID, text) in meaningfulEntries {
                 if longest == nil || text.count > (longest?.text.count ?? 0) {
                     longest = (localeID: localeID, text: text)
                 }
@@ -505,7 +591,7 @@ final class AppModel: ObservableObject {
 
         // 未选中的识别器结果整条丢弃，并在状态栏留一句可诊断的痕迹
         var discardNotice: String?
-        for (localeID, text) in entries {
+        for (localeID, text) in meaningfulEntries {
             if let chosen = chosenLocaleID, localeID == chosen { continue }
             let isChinesePath: Bool = SpeechLanguage.from(localeID: localeID) == .chinese
             let kind: String = isChinesePath ? "中文识别结果" : "英文幻觉"
@@ -659,13 +745,14 @@ final class AppModel: ObservableObject {
                                      metrics: summary,
                                      latencyMS: latency,
                                      generation: currentGeneration,
-                                     sourceText: jobSourceText)
+                                     sourceText: jobSourceText,
+                                     isMeaningful: itxHasMeaningfulText(cleaned))
         }
 
         Task { @MainActor in
             do {
                 let result: TranslationOutput = try await task.value
-                if result.generation == self.generation {
+                if result.generation == self.generation, result.isMeaningful {
                     // 连续字幕：先把当前这句搬到「上一句」，再落新的
                     if !self.translation.isEmpty {
                         self.previousTranslation = self.translation
@@ -697,27 +784,34 @@ final class AppModel: ObservableObject {
 
     // MARK: - 模型下载 / 导入
 
-    func downloadModel() {
-        guard !isDownloading else { return }
+    /// 下载指定模型（urlString 由界面从 ModelStore 的 Q4 / Q8 常量传入）。
+    func downloadModel(from urlString: String) {
+        guard !isDownloading, !isListening else { return }
         isDownloading = true
         downloadProgress = 0
         errorMessage = ""
         statusText = "正在下载模型…"
 
-        let urlString: String = ModelStore.defaultDownloadURLString
         Task { @MainActor in
             do {
-                let fileURL: URL = try await ModelStore.downloadModel(from: urlString) { [weak self] (fraction: Double) in
+                let savedURL: URL = try await ModelStore.downloadModel(from: urlString) { [weak self] (fraction: Double) in
                     Task { @MainActor in
                         self?.downloadProgress = min(max(fraction, 0.0), 1.0)
                     }
                 }
-                _ = fileURL
+                let savedName: String = savedURL.lastPathComponent
                 self.downloadProgress = 1.0
                 self.isDownloading = false
                 self.statusText = "模型下载完成，正在加载…"
-                self.isLoadingModel = true
-                self.loadModelIfNeeded()
+                ModelStore.selectModel(name: savedName)
+                self.currentModelName = savedName
+                self.refreshModels()
+                if self.isModelReady {
+                    self.switchModel(to: savedName)
+                } else {
+                    self.isLoadingModel = true
+                    self.loadModelIfNeeded()
+                }
             } catch {
                 self.isDownloading = false
                 self.statusText = "模型下载失败"
@@ -726,9 +820,14 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// 兼容旧调用：默认下载 Q4_K_M。
+    func downloadModel() {
+        downloadModel(from: ModelStore.q4DownloadURLString)
+    }
+
     /// 文件选择器拿到的 URL 直接交给 ModelStore（安全作用域访问由它处理）。
     func importModel(url: URL) {
-        guard !isDownloading, !isLoadingTask else { return }
+        guard !isDownloading, !isLoadingTask, !isListening else { return }
         errorMessage = ""
         statusText = "正在导入模型…"
         isLoadingModel = true
@@ -739,8 +838,17 @@ final class AppModel: ObservableObject {
                 let task: Task<URL, Error> = Task.detached {
                     return try ModelStore.importModel(from: sourceURL)
                 }
-                _ = try await task.value
-                self.loadModelIfNeeded()
+                let importedURL: URL = try await task.value
+                let importedName: String = importedURL.lastPathComponent
+                ModelStore.selectModel(name: importedName)
+                self.currentModelName = importedName
+                self.refreshModels()
+                if self.isModelReady {
+                    self.switchModel(to: importedName)
+                } else {
+                    self.isLoadingModel = true
+                    self.loadModelIfNeeded()
+                }
             } catch {
                 self.isLoadingModel = false
                 self.statusText = "模型导入失败"
@@ -775,6 +883,7 @@ final class AppModel: ObservableObject {
     var diagnosticReport: String {
         var lines: [String] = []
         lines.append("模型：" + (modelName.isEmpty ? "未加载" : modelName))
+        lines.append("当前模型文件：" + (currentModelName.isEmpty ? "无" : currentModelName))
         lines.append("引擎：" + (asrEngineName.isEmpty ? "未启动" : asrEngineName))
 
         let inputText: String

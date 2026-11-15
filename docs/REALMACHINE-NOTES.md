@@ -42,3 +42,30 @@
 - 中→法/日/韩/西 在真机上的质量与延迟（Windows CPU 上的基线见 `tools/out/ab_english.md`）
 - 长时间连续说话时队列「丢旧保新」的实际观感
 - 免费账号 7 天到期重签流程（模型与设置是否保留）
+
+## Metal 首次编译开销（重要）
+
+真机 `Documents/llama.log`（156 KB）里除了 `offloaded 26/26 layers to GPU`，还有一段容易被忽略的：
+
+```
+ggml_metal_library_init: using embedded metal library
+ggml_metal_library_compile_all: compiled 'fa_aux' library in 1.981 sec
+ggml_metal_library_compile_all: compiled 'fa_f16' library in 9.101 sec
+...
+```
+
+36 个 Metal 库合计 **173.5 秒**。也就是说模型加载阶段除了读 1.2 GB 权重，还要现场编译 Metal 内核。
+
+- 这是 llama.cpp 的 `GGML_METAL_EMBED_LIBRARY` + 运行时特化管线机制，不是我们的代码问题
+- 若表现成「每次冷启动要等几分钟」：优先确认是否只是首次（Metal 管线缓存落在 App 的 Library/Caches）
+- 备选优化（未做）：启动时先加载模型并显示进度；或研究 llama.cpp 是否能跳过 compile_all 走惰性编译
+
+## 2026-11-15 · 模型档位实测（用户真机）
+
+| 模型 | 体积 | 真机延迟 | 结论 |
+|---|---:|---|---|
+| `Index-Translate-2B.Q4_K_M.gguf` | 1,251.4 MB | 166–319 ms/句 | 默认档 |
+| `Index-Translate-2B.Q8_0.gguf` | 1,980.5 MB | **与 Q4 接近** | M 系列设备推荐档（质量更高） |
+
+App 因此支持多模型并存与切换；导入时保留原文件名，不再改名成 Q4。
+

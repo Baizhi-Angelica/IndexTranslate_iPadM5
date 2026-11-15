@@ -2,7 +2,7 @@
 //  ContentView.swift
 //  ITXTranslate
 //
-//  iPad 全屏界面（白底、大字）：
+//  iPad / iPhone 自适应界面（白底、大字）：
 //  顶部标题与状态 → 中部译文 / 原文 / 性能 → 底部语言选择 + 麦克风与清空。
 //
 
@@ -18,11 +18,18 @@ struct ContentView: View {
     @State private var showInfoSheet: Bool = false
     @State private var showFileImporter: Bool = false
 
+    /// iPhone 竖屏等紧凑宽度下自动缩字号 / 缩边距
+    @Environment(\.horizontalSizeClass) private var hSize
+
+    private var isCompact: Bool {
+        return hSize == .compact
+    }
+
     var body: some View {
         ZStack {
             Color.white.ignoresSafeArea()
 
-            VStack(spacing: 12) {
+            VStack(spacing: isCompact ? 8 : 12) {
                 header
 
                 if !model.errorMessage.isEmpty {
@@ -42,9 +49,9 @@ struct ContentView: View {
                 languageSelectors
                 bottomControls
             }
-            .padding(.horizontal, 34)
-            .padding(.top, 20)
-            .padding(.bottom, 16)
+            .padding(.horizontal, isCompact ? 16 : 32)
+            .padding(.top, isCompact ? 12 : 20)
+            .padding(.bottom, isCompact ? 12 : 16)
             .frame(maxWidth: 1100)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
@@ -77,7 +84,7 @@ struct ContentView: View {
         HStack(alignment: .center, spacing: 12) {
             VStack(alignment: .leading, spacing: 5) {
                 Text("本地语音翻译 · Index-Translate-2B")
-                    .font(.system(size: 26, weight: .bold))
+                    .font(.system(size: isCompact ? 22 : 26, weight: .bold))
                     .foregroundStyle(Color.primary)
                     .lineLimit(1)
                     .minimumScaleFactor(0.6)
@@ -87,7 +94,7 @@ struct ContentView: View {
                         .fill(statusColor)
                         .frame(width: 8, height: 8)
                     Text(model.statusText)
-                        .font(.system(size: 14))
+                        .font(.system(size: isCompact ? 13 : 14))
                         .foregroundStyle(Color.secondary)
                         .lineLimit(2)
                         .minimumScaleFactor(0.75)
@@ -157,7 +164,7 @@ struct ContentView: View {
                     // 上一句译文：与当前句同字号，只变灰
                     if !model.previousTranslation.isEmpty {
                         Text(model.previousTranslation)
-                            .font(.system(size: 40, weight: .semibold))
+                            .font(.system(size: isCompact ? 30 : 40, weight: .semibold))
                             .foregroundStyle(Color.secondary)
                             .lineLimit(2)
                             .minimumScaleFactor(0.6)
@@ -177,15 +184,15 @@ struct ContentView: View {
 
                     // 当前句译文：保持大字
                     Text(translationDisplayText)
-                        .font(.system(size: 40, weight: .semibold))
+                        .font(.system(size: isCompact ? 30 : 40, weight: .semibold))
                         .minimumScaleFactor(0.5)
                         .foregroundStyle(model.translation.isEmpty ? Color.secondary.opacity(0.55) : Color.primary)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .textSelection(.enabled)
 
-                    // 当前句原文：18pt 灰色小字（只显示这一句，不累积整场）
+                    // 当前句原文：灰色小字（只显示这一句，不累积整场）
                     Text(model.currentSource)
-                        .font(.system(size: 18))
+                        .font(.system(size: isCompact ? 16 : 18))
                         .foregroundStyle(Color.secondary)
                         .lineLimit(3)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -194,7 +201,10 @@ struct ContentView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             .scrollIndicators(.hidden)
-            .frame(maxWidth: .infinity, minHeight: 90, maxHeight: 320, alignment: .topLeading)
+            .frame(maxWidth: .infinity,
+                   minHeight: isCompact ? 50 : 90,
+                   maxHeight: isCompact ? 220 : 320,
+                   alignment: .topLeading)
 
             metricsRow
 
@@ -202,11 +212,11 @@ struct ContentView: View {
             if !model.livePartial.isEmpty {
                 HStack(alignment: .top, spacing: 6) {
                     Image(systemName: "waveform")
-                        .font(.system(size: 13, weight: .medium))
+                        .font(.system(size: isCompact ? 12 : 13, weight: .medium))
                         .foregroundStyle(Color.blue)
-                        .padding(.top, 4)
+                        .padding(.top, 3)
                     Text(model.livePartial)
-                        .font(.system(size: 18))
+                        .font(.system(size: isCompact ? 16 : 18))
                         .italic()
                         .foregroundStyle(Color.blue)
                         .lineLimit(2)
@@ -278,13 +288,29 @@ struct ContentView: View {
 
     // MARK: - 模型缺失 / 下载中卡片
 
+    private func modelDownloadButton(title: String, urlString: String, primary: Bool) -> some View {
+        Button {
+            model.downloadModel(from: urlString)
+        } label: {
+            Text(title)
+                .font(.system(size: isCompact ? 14 : 16, weight: .semibold))
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, isCompact ? 10 : 12)
+                .background(Capsule().fill(primary ? Color.accentColor : Color(.systemGray5)))
+                .foregroundStyle(primary ? Color.white : Color.primary)
+        }
+        .buttonStyle(.plain)
+    }
+
     private var modelCard: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: isCompact ? 8 : 12) {
             HStack(spacing: 8) {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .foregroundStyle(Color.orange)
                 Text("未找到本地模型")
-                    .font(.system(size: 19, weight: .semibold))
+                    .font(.system(size: isCompact ? 16 : 19, weight: .semibold))
                     .foregroundStyle(Color.primary)
                 Spacer(minLength: 0)
                 if model.isDownloading {
@@ -299,52 +325,55 @@ struct ContentView: View {
                     .progressViewStyle(.linear)
                     .tint(Color.accentColor)
 
-                Text("正在下载移动版 \(ModelStore.modelFileName)（基于 Qwen3.5-2B · Q4_K_M 量化，约 1.22 GB），完成后会自动加载，不用重启 App。")
-                    .font(.system(size: 14))
+                Text("正在下载模型（Q4_K_M 约 1.25 GB / Q8_0 约 2 GB），完成后会自动加载，不用重启 App。")
+                    .font(.system(size: isCompact ? 13 : 14))
                     .foregroundStyle(Color.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             } else {
-                Text("需要模型 Index-Translate-2B-Q4_K_M（基于 Qwen3.5-2B · Q4_K_M 量化，约 1.22 GB）。下载后完全离线运行，音频和文字都不会上传。")
-                    .font(.system(size: 14))
+                Text("需要 Index-Translate-2B 模型（基于 Qwen3.5-2B）：Q4_K_M 约 1.25 GB（省空间），Q8_0 约 2 GB（质量最好）。下载后完全离线运行，音频和文字都不会上传。")
+                    .font(.system(size: isCompact ? 13 : 14))
                     .foregroundStyle(Color.secondary)
                     .fixedSize(horizontal: false, vertical: true)
 
-                Text("官方文件名是 Index-Translate-2B.Q4_K_M.gguf；App 默认拉的是移动版 Index-Translate-2B-Q4_K_M.gguf（不含视觉塔、体积更小），两者都能用。")
-                    .font(.system(size: 13))
+                Text("M 系列 iPad / iPhone Pro 推荐 Q8_0——实测解码速度与 Q4 接近，质量更高；较老的设备建议 Q4_K_M。")
+                    .font(.system(size: isCompact ? 11 : 13))
                     .foregroundStyle(Color.secondary)
                     .fixedSize(horizontal: false, vertical: true)
 
-                HStack(spacing: 12) {
-                    Button {
-                        model.downloadModel()
-                    } label: {
-                        Text("下载模型 Q4_K_M（约 1.22 GB）")
-                            .font(.system(size: 16, weight: .semibold))
-                            .padding(.horizontal, 18)
-                            .padding(.vertical, 12)
-                            .background(Capsule().fill(Color.accentColor))
-                            .foregroundStyle(Color.white)
+                if isCompact {
+                    HStack(spacing: 10) {
+                        modelDownloadButton(title: "Q4_K_M · 1.25 GB",
+                                            urlString: ModelStore.q4DownloadURLString,
+                                            primary: false)
+                        modelDownloadButton(title: "Q8_0 · 2 GB",
+                                            urlString: ModelStore.q8DownloadURLString,
+                                            primary: true)
                     }
-                    .buttonStyle(.plain)
-
-                    Button {
-                        showFileImporter = true
-                    } label: {
-                        Label("从文件导入…", systemImage: "folder")
-                            .font(.system(size: 16, weight: .medium))
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 12)
-                            .background(Capsule().fill(Color(.systemGray5)))
-                            .foregroundStyle(Color.primary)
-                    }
-                    .buttonStyle(.plain)
-
-                    Spacer(minLength: 0)
+                } else {
+                    modelDownloadButton(title: "下载 Q4_K_M（约 1.25 GB，省空间）",
+                                        urlString: ModelStore.q4DownloadURLString,
+                                        primary: false)
+                    modelDownloadButton(title: "下载 Q8_0（约 2 GB，质量最好）",
+                                        urlString: ModelStore.q8DownloadURLString,
+                                        primary: true)
                 }
+
+                Button {
+                    showFileImporter = true
+                } label: {
+                    Label("从文件导入…", systemImage: "folder")
+                        .font(.system(size: isCompact ? 14 : 16, weight: .medium))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, isCompact ? 8 : 12)
+                        .background(RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(Color(.systemGray6)))
+                        .foregroundStyle(Color.primary)
+                }
+                .buttonStyle(.plain)
 
                 HStack(spacing: 14) {
                     Text("也可以把 .gguf 放进 文件 App → 我的 iPad → ITX 翻译")
-                        .font(.system(size: 13))
+                        .font(.system(size: isCompact ? 11 : 13))
                         .foregroundStyle(Color.secondary)
                         .fixedSize(horizontal: false, vertical: true)
 
@@ -352,14 +381,14 @@ struct ContentView: View {
                         model.rescanModel()
                     } label: {
                         Text("已放好文件？重新扫描")
-                            .font(.system(size: 13, weight: .semibold))
+                            .font(.system(size: isCompact ? 11 : 13, weight: .semibold))
                             .foregroundStyle(Color.accentColor)
                     }
                     .buttonStyle(.plain)
                 }
             }
         }
-        .padding(20)
+        .padding(isCompact ? 14 : 20)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(RoundedRectangle(cornerRadius: 20, style: .continuous)
             .fill(Color(.systemGray6).opacity(0.55)))
@@ -370,7 +399,7 @@ struct ContentView: View {
     // MARK: - 输入 / 输出语言选择
 
     private var languageSelectors: some View {
-        HStack(spacing: 14) {
+        HStack(spacing: isCompact ? 10 : 14) {
             Menu {
                 ForEach(InputMode.allCases) { (mode: InputMode) in
                     Button {
@@ -409,22 +438,24 @@ struct ContentView: View {
     }
 
     private func selectorLabel(title: String, value: String, systemImage: String) -> some View {
-        HStack(spacing: 8) {
+        HStack(spacing: isCompact ? 6 : 8) {
             Image(systemName: systemImage)
-                .font(.system(size: 15, weight: .semibold))
+                .font(.system(size: isCompact ? 14 : 15, weight: .semibold))
                 .foregroundStyle(Color.secondary)
             Text(title)
-                .font(.system(size: 14))
+                .font(.system(size: isCompact ? 13 : 14))
                 .foregroundStyle(Color.secondary)
             Text(value)
-                .font(.system(size: 17, weight: .semibold))
+                .font(.system(size: isCompact ? 16 : 17, weight: .semibold))
                 .foregroundStyle(Color.primary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
             Image(systemName: "chevron.down")
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(Color.secondary)
         }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 11)
+        .padding(.horizontal, isCompact ? 14 : 18)
+        .padding(.vertical, isCompact ? 9 : 11)
         .background(Capsule().fill(Color(.systemGray6)))
         .contentShape(Capsule())
     }
@@ -432,9 +463,9 @@ struct ContentView: View {
     // MARK: - 底部：麦克风 + 清空
 
     private var bottomControls: some View {
-        HStack(spacing: 16) {
+        HStack(spacing: isCompact ? 10 : 16) {
             Color.clear
-                .frame(width: 118, height: 1)
+                .frame(width: isCompact ? 96 : 118, height: 1)
 
             Spacer(minLength: 0)
 
@@ -453,12 +484,12 @@ struct ContentView: View {
             ZStack {
                 Circle()
                     .fill(model.isListening ? Color.red : Color(.systemGray5))
-                    .frame(width: 108, height: 108)
+                    .frame(width: isCompact ? 96 : 108, height: isCompact ? 96 : 108)
                     .shadow(color: model.isListening ? Color.red.opacity(0.35) : Color.clear,
                             radius: 18)
 
                 Image(systemName: "mic.fill")
-                    .font(.system(size: 34, weight: .semibold))
+                    .font(.system(size: isCompact ? 30 : 34, weight: .semibold))
                     .foregroundStyle(model.isListening ? Color.white : Color.secondary)
             }
         }
@@ -473,14 +504,14 @@ struct ContentView: View {
             model.clearAll()
         } label: {
             Label("清空", systemImage: "trash")
-                .font(.system(size: 17, weight: .medium))
-                .padding(.horizontal, 18)
-                .padding(.vertical, 11)
+                .font(.system(size: isCompact ? 16 : 17, weight: .medium))
+                .padding(.horizontal, isCompact ? 14 : 18)
+                .padding(.vertical, isCompact ? 9 : 11)
                 .background(Capsule().fill(Color(.systemGray6)))
                 .foregroundStyle(Color.primary)
         }
         .buttonStyle(.plain)
-        .frame(width: 118, alignment: .trailing)
+        .frame(width: isCompact ? 96 : 118, alignment: .trailing)
         .accessibilityLabel("清空译文与原文")
     }
 }
@@ -509,21 +540,120 @@ private struct InfoSheet: View {
                     .font(.system(size: 16, weight: .semibold))
                 }
 
-                VStack(alignment: .leading, spacing: 4) {
+                // 模型：当前选择、引导、已安装列表、下载
+                VStack(alignment: .leading, spacing: 8) {
                     Text("模型")
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(Color.secondary)
-                    Text("Index-Translate-2B-Q4_K_M")
+                    Text(model.currentModelName.isEmpty ? "Index-Translate-2B" : model.currentModelName)
                         .font(.system(size: 16, weight: .semibold))
                         .foregroundStyle(Color.primary)
-                    Text("基于 Qwen3.5-2B · Q4_K_M 量化")
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text("基于 Qwen3.5-2B · Q4_K_M / Q8_0 量化，全离线推理")
                         .font(.system(size: 12))
                         .foregroundStyle(Color.secondary)
                     if !model.modelName.isEmpty {
                         Text("已加载：" + model.modelName)
-                            .font(.system(size: 12))
+                            .font(.system(size: 11))
                             .foregroundStyle(Color.secondary.opacity(0.85))
                             .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Text("M 系列 iPad / iPhone Pro 推荐 Q8_0——实测解码速度与 Q4 接近，质量更高；较老的设备建议 Q4_K_M。")
+                        .font(.system(size: 12))
+                        .foregroundStyle(Color.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                // 已安装模型列表：点一下切换
+                VStack(alignment: .leading, spacing: 8) {
+                    if model.models.isEmpty {
+                        Text("Documents 里还没有可用的 .gguf 模型。")
+                            .font(.system(size: 13))
+                            .foregroundStyle(Color.secondary)
+                    } else {
+                        ForEach(model.models) { (entry: ModelEntry) in
+                            Button {
+                                model.switchModel(to: entry.name)
+                            } label: {
+                                HStack(spacing: 10) {
+                                    Image(systemName: model.currentModelName == entry.name
+                                          ? "checkmark.circle.fill" : "circle")
+                                        .font(.system(size: 16))
+                                        .foregroundStyle(model.currentModelName == entry.name
+                                                         ? Color.accentColor : Color.secondary)
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(entry.name)
+                                            .font(.system(size: 14, weight: .medium))
+                                            .foregroundStyle(Color.primary)
+                                            .lineLimit(2)
+                                            .multilineTextAlignment(.leading)
+                                        Text(entry.displaySize)
+                                            .font(.system(size: 12))
+                                            .foregroundStyle(Color.secondary)
+                                    }
+                                    Spacer(minLength: 0)
+                                    if model.isModelReady && model.currentModelName == entry.name {
+                                        Text("使用中")
+                                            .font(.system(size: 11, weight: .medium))
+                                            .foregroundStyle(Color.secondary)
+                                    }
+                                }
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 9)
+                                .background(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                    .fill(model.currentModelName == entry.name
+                                          ? Color.accentColor.opacity(0.10)
+                                          : Color(.systemGray6)))
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(model.isDownloading || model.isListening)
+                        }
+                    }
+                }
+
+                // 下载：进度条复用 downloadProgress
+                VStack(alignment: .leading, spacing: 8) {
+                    if model.isDownloading {
+                        HStack(spacing: 8) {
+                            Text("正在下载模型…")
+                                .font(.system(size: 13))
+                                .foregroundStyle(Color.secondary)
+                            Spacer(minLength: 0)
+                            Text("\(Int(model.downloadProgress * 100))%")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(Color.primary)
+                        }
+                        ProgressView(value: model.downloadProgress)
+                            .progressViewStyle(.linear)
+                            .tint(Color.accentColor)
+                    } else {
+                        Button {
+                            model.downloadModel(from: ModelStore.q4DownloadURLString)
+                        } label: {
+                            Text("下载 Q4_K_M（约 1.25 GB，省空间）")
+                                .font(.system(size: 15, weight: .medium))
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 11)
+                                .background(RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    .fill(Color(.systemGray6)))
+                                .foregroundStyle(Color.primary)
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(model.isListening)
+
+                        Button {
+                            model.downloadModel(from: ModelStore.q8DownloadURLString)
+                        } label: {
+                            Text("下载 Q8_0（约 2 GB，质量最好）")
+                                .font(.system(size: 15, weight: .semibold))
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 11)
+                                .background(RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    .fill(Color.accentColor.opacity(0.12)))
+                                .foregroundStyle(Color.accentColor)
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(model.isListening)
                     }
                 }
 
@@ -582,7 +712,7 @@ private struct InfoSheet: View {
                     Text("Prompt 说明")
                         .font(.system(size: 17, weight: .semibold))
                         .foregroundStyle(Color.primary)
-                    Text("每句话定稿后，App 用 PromptBuilder.full(text:source:target:) 生成「把这段{源语言}翻译成{目标语言}，只输出译文」的 ChatML 提示词，交给本地 Index-Translate-2B-Q4_K_M（基于 Qwen3.5-2B，Q4_K_M 量化）推理；输出再经 PromptBuilder.clean(_:) 去掉思考段、引号和多余空行后显示。全程离线，音频与文字都不会上传。")
+                    Text("每句话定稿后，App 用 PromptBuilder.full(text:source:target:) 生成「把这段{源语言}翻译成{目标语言}，只输出译文」的 ChatML 提示词，交给本地 Index-Translate-2B（基于 Qwen3.5-2B，Q4_K_M / Q8_0 量化）推理；输出再经 PromptBuilder.clean(_:) 去掉思考段、引号和多余空行后显示。全程离线，音频与文字都不会上传。")
                         .font(.system(size: 14))
                         .foregroundStyle(Color.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -627,6 +757,9 @@ private struct InfoSheet: View {
                 .buttonStyle(.plain)
             }
             .padding(24)
+        }
+        .onAppear {
+            model.refreshModels()
         }
     }
 
