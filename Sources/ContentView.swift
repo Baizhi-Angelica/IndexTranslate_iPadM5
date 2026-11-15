@@ -372,7 +372,7 @@ struct ContentView: View {
                 .buttonStyle(.plain)
 
                 HStack(spacing: 14) {
-                    Text("也可以把 .gguf 放进 文件 App → 我的 iPad → ITX 翻译")
+                    Text("也可以把 .gguf 放进 文件 App → 我的 iPad → index-translate")
                         .font(.system(size: isCompact ? 11 : 13))
                         .foregroundStyle(Color.secondary)
                         .fixedSize(horizontal: false, vertical: true)
