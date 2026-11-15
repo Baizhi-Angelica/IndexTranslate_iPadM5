@@ -53,6 +53,10 @@ const char *itx_system_info(void);
 const char *itx_last_log(void);
 void itx_clear_log(void);
 
+/// 把后续日志追加写进文件（App 的 Documents 目录，可在「文件」App 里取走）。
+/// 传 NULL 关闭。返回 0 成功。
+int32_t itx_set_log_path(const char *path);
+
 #ifdef __cplusplus
 }
 #endif

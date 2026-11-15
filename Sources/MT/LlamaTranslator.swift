@@ -47,6 +47,14 @@ final class LlamaTranslator: @unchecked Sendable {
     private var descriptionStorage: String = "未加载模型"
 
     init() {
+        // 设备上没有 Xcode 控制台：把 llama.cpp 的日志落到 Documents/llama.log，
+        // 用户可以在「文件」App → 我的 iPad → ITX 翻译 里直接取走发给我们排障。
+        let logURL: URL = ModelStore.documentsDirectory.appendingPathComponent("llama.log")
+        try? "".write(to: logURL, atomically: true, encoding: .utf8)
+        itx_clear_log()
+        _ = logURL.path.withCString { (pointer: UnsafePointer<CChar>) -> Int32 in
+            itx_set_log_path(pointer)
+        }
     }
 
     deinit {
@@ -67,6 +75,14 @@ final class LlamaTranslator: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         return descriptionStorage
+    }
+
+    /// llama.cpp 最近的日志（另有一份写在 Documents/llama.log）
+    var lastLog: String {
+        guard let pointer: UnsafePointer<CChar> = itx_last_log() else {
+            return ""
+        }
+        return String(cString: pointer)
     }
 
     // MARK: - 加载 / 卸载

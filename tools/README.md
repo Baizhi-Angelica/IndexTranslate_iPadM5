@@ -145,3 +145,28 @@ python tools\regress_prompts.py --n-predict 192 --timeout 180   # 可选参数
 - 语料想加/改就编辑 `tools/segments.py`（保持 id 唯一，中文语料 `english_terms` 必须真的出现在 text 里），
   改完跑一下 `python tools\segments.py` 自检。
 - 同一台机器上不要并发跑多个回归（服务端只有 4 slots，并发会污染延迟统计），脚本内部本来就是顺序请求。
+
+## A/B 实验：英文词保留策略（ab_english.py）
+
+对比 4 种“保住英文词”的 prompt 策略（同一批中文语料 zh-01..zh-12 × 目标语言 ja/ko/fr/es/en）：
+
+| 策略 | 做法 |
+| --- | --- |
+| S1 基线 | 现有官方方案（中文源→非英语目标用「约束翻译」+ 软性保留要求；zh→en 用普通翻译） |
+| S2 术语表 | 自动抽取源文英文片段，拼成硬约束 `专名/术语对照: X→X、Y→Y`（其余同 S1） |
+| S3 占位符 | 英文片段换成 `{0}` `{1}`…，普通翻译 prompt + 一句“保留占位符原样”，译文后还原 |
+| S4 占位符+术语表 | S3 替换 + S2 术语表（术语表按还原后的英文形式写）+ 占位符保留要求 |
+
+```powershell
+python tools\ab_english.py                                     # 4 策略 × 5 目标 × 12 语料 = 240 次调用
+python tools\ab_english.py --strategies s1,s2,s3,s4 --targets ja,ko,fr,es,en
+python tools\ab_english.py --strategies s1,s2 --targets ja --limit 8   # 冒烟
+```
+
+- 产物：`tools/out/ab_english.md`（主表 + 按词保留率/整句全中率矩阵 + 占位符健康度 + 6 组四策略并排样本 + 自动决策建议）、
+  `tools/out/ab_raw.json`（含完整 prompt、原始输出、还原后输出、占位符统计）。
+- 判定：按词保留率（`english_terms` 保留词数/总词数）、整句全中率、空输出；S3/S4 还统计
+  **残留 `{n}`、丢失、重复、空格变体（`{ 0 }`/`{0 }`）**——还原逻辑用 `\{\s*(\d+)\s*\}` 容忍空格变体，
+  最终译文里仍残留 `{数字}` 才算残留（必须为 0）。
+- 英文片段抽取规则：连续“拉丁字母/空格/连字符”且长度≥2，去重保序（数字/标点/汉字会截断片段）。
+- 与回归脚本一样：只发请求、不重启服务；默认同样是 `--base-url http://127.0.0.1:8089`、`--out-dir tools\out`。

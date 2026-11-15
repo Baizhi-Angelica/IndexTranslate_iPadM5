@@ -25,6 +25,7 @@ static bool g_backend_ready = false;
 // 设备上没有 Xcode 控制台：把 llama.cpp 的日志存一份，给 App 的「信息」面板显示
 #define ITX_LOG_CAP 8192
 static char g_log_buf[ITX_LOG_CAP] = {0};
+static FILE * g_log_file = NULL;
 
 static void itx_log_callback(enum ggml_log_level level, const char * text, void * user_data) {
     (void)level;
@@ -33,6 +34,10 @@ static void itx_log_callback(enum ggml_log_level level, const char * text, void 
         return;
     }
     fputs(text, stderr);
+    if (g_log_file != NULL) {
+        fputs(text, g_log_file);
+        fflush(g_log_file);
+    }
     size_t used = strlen(g_log_buf);
     if (used >= (size_t)ITX_LOG_CAP - 1) {
         // 满了就丢掉前半段，保留最近的日志
@@ -43,6 +48,21 @@ static void itx_log_callback(enum ggml_log_level level, const char * text, void 
     }
     size_t room = (size_t)ITX_LOG_CAP - used - 1;
     strncat(g_log_buf, text, room);
+}
+
+int32_t itx_set_log_path(const char *path) {
+    if (g_log_file != NULL) {
+        fclose(g_log_file);
+        g_log_file = NULL;
+    }
+    if (path == NULL) {
+        return 0;
+    }
+    g_log_file = fopen(path, "a");
+    if (g_log_file == NULL) {
+        return -1;
+    }
+    return 0;
 }
 
 const char *itx_last_log(void) {

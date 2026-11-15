@@ -1,0 +1,23 @@
+name: diagnose
+
+# 只用来判断 GitHub Actions 能不能跑（账号 billing 锁是否影响所有 runner）
+on:
+  workflow_dispatch:
+
+jobs:
+  ubuntu-runner:
+    runs-on: ubuntu-latest
+    steps:
+      - name: hello
+        run: |
+          echo "ubuntu runner OK"
+          uname -a
+
+  macos-runner:
+    runs-on: macos-26
+    steps:
+      - name: hello
+        run: |
+          echo "macos runner OK"
+          sw_vers
+          xcodebuild -version || true
