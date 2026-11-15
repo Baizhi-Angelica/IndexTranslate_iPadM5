@@ -1,0 +1,10 @@
+# 统一 LF，避免 Windows 上 CRLF 影响补丁匹配
+* text=auto eol=lf
+*.swift text eol=lf
+*.c text eol=lf
+*.h text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.md text eol=lf
+*.py text eol=lf
+*.plist text eol=lf

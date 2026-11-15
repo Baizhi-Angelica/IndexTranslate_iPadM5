@@ -16,3 +16,10 @@ xcuserdata/
 # æœ¬åœ°ä¸´æ—¶
 .dsh-tmp/
 tools/out/
+
+# Python
+__pycache__/
+*.pyc
+
+# ÁÙÊ± A/B ²úÎï
+tools/out-*/
