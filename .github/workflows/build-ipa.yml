@@ -55,6 +55,9 @@ jobs:
 
       - name: Build (unsigned)
         run: |
+          # GitHub Actions 默认 bash -e：先关掉 -e，否则 xcodebuild 一失败就退出，
+          # 下面的错误摘要（真正有用的日志）永远打不出来。
+          set +e
           set -o pipefail
           xcodebuild \
             -project ITXTranslate.xcodeproj \
@@ -66,11 +69,14 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
             build 2>&1 | tee /tmp/build.log
-          status=${PIPESTATUS[0]}
+          status=$?
           if [ "$status" -ne 0 ]; then
             echo "=============== 编译失败，错误摘要 ==============="
-            grep -n -E "error:|error;|fatal error|The following build commands failed" /tmp/build.log | head -80 || true
+            grep -n -E "error:|error;|fatal error|The following build commands failed" /tmp/build.log | head -120 || true
+            echo "=============== 摘要结束 ==============="
+            exit "$status"
           fi
+          echo "BUILD OK"
 
       - name: Package IPA
         run: |
