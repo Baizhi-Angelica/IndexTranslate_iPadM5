@@ -194,9 +194,28 @@ struct ContentView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             .scrollIndicators(.hidden)
-            .frame(maxWidth: .infinity, minHeight: 90, maxHeight: 340, alignment: .topLeading)
+            .frame(maxWidth: .infinity, minHeight: 90, maxHeight: 320, alignment: .topLeading)
 
             metricsRow
+
+            // 正在说话（未定稿）的实时文本：放在 metrics 行下面，不占「当前句原文」的位置
+            if !model.livePartial.isEmpty {
+                HStack(alignment: .top, spacing: 6) {
+                    Image(systemName: "waveform")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(Color.blue)
+                        .padding(.top, 4)
+                    Text(model.livePartial)
+                        .font(.system(size: 18))
+                        .italic()
+                        .foregroundStyle(Color.blue)
+                        .lineLimit(2)
+                        .truncationMode(.tail)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .textSelection(.enabled)
+                }
+                .padding(.top, 4)
+            }
         }
         .padding(.vertical, 2)
         .frame(maxWidth: .infinity)

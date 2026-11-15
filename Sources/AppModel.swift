@@ -73,6 +73,8 @@ final class AppModel: ObservableObject {
     @Published var sourceText: String = ""
     /// 当前这句（正在说 / 刚翻译）的原文：原文行只显示这一段，不累积整场
     @Published var currentSource: String = ""
+    /// 正在说话（未定稿）的实时文本：显示在 metrics 行下面，不占「当前句原文」的位置
+    @Published var livePartial: String = ""
     /// 上一句译文（连续字幕：上方同字号灰色）
     @Published var previousTranslation: String = ""
     /// 上一句原文（连续字幕：上方更小一号灰色）
@@ -89,6 +91,9 @@ final class AppModel: ObservableObject {
 
     /// 已经定稿的转写文本；实时 partial 拼在它后面显示
     private var finalizedTranscript: String = ""
+
+    /// 电平自适应归一化用的慢衰减峰值（安静后慢慢回落，约 2 秒半衰）
+    private var levelPeak: Double = 0.45
 
     /// 自动模式配对：localeID -> 该识别器给出的 final（每路保留一条）
     private var pendingFinals: [String: String] = [:]
@@ -329,6 +334,8 @@ final class AppModel: ObservableObject {
         asr = nil
         isListening = false
         level = 0
+        levelPeak = 0.45
+        livePartial = ""
         UIApplication.shared.isIdleTimerDisabled = false
         statusNoticeToken += 1
         statusNoticeUntil = nil
@@ -354,8 +361,8 @@ final class AppModel: ObservableObject {
             var combined: String = finalizedTranscript
             let trimmed: String = text.trimmingCharacters(in: .whitespacesAndNewlines)
             if !trimmed.isEmpty {
-                // 实时 partial 只刷新「当前句原文」的临时显示
-                currentSource = trimmed
+                // 实时 partial 只进「正在听」区，不占「当前句原文」的位置
+                livePartial = trimmed
                 if !combined.isEmpty {
                     combined += " "
                 }
@@ -367,11 +374,13 @@ final class AppModel: ObservableObject {
             handleFinal(localeID: localeID, text: text)
 
         case let .level(value):
-            // 原始 RMS 正常话音只有 0.01–0.05，先转 dB 再映射到 0…1；快起慢落做平滑
+            // 自适应归一化：宽范围 dB 原始值 + 慢衰减峰值，正常说话大半格、喊叫接近满格
             let rms: Double = Double(max(value, 0.000001))
             let db: Double = 20.0 * log10(rms)
-            let norm: Double = min(1.0, max(0.0, (db + 55.0) / 55.0))
-            level = max(norm, level * 0.82)
+            let raw: Double = min(1.0, max(0.0, (db + 55.0) / 50.0))
+            levelPeak = max(raw, levelPeak * 0.995)
+            let normalized: Double = min(1.0, raw / max(levelPeak, 0.45))
+            level = max(normalized, level * 0.80)
 
         case let .error(message):
             errorMessage = message
@@ -413,6 +422,7 @@ final class AppModel: ObservableObject {
             // 手动模式：不配对，直接追加原文并翻译
             let source: SpeechLanguage = SpeechLanguage.detect(from: trimmed)
             currentSource = trimmed
+            livePartial = ""
             appendFinalToTranscript(trimmed, source: source)
             enqueue(text: trimmed, source: source)
         }
@@ -511,6 +521,7 @@ final class AppModel: ObservableObject {
         let source: SpeechLanguage = SpeechLanguage.detect(from: text)
         // 选中这一条：它既是原文行当前显示，也是这条翻译 job 的原文
         currentSource = text
+        livePartial = ""
         appendFinalToTranscript(text, source: source)
         enqueue(text: text, source: source)
 
@@ -789,11 +800,13 @@ final class AppModel: ObservableObject {
         finalizedTranscript = ""
         sourceText = ""
         currentSource = ""
+        livePartial = ""
         previousTranslation = ""
         previousSource = ""
         metrics = ""
         lastLatencyMS = 0
         level = 0
+        levelPeak = 0.45
         errorMessage = ""
         isTranslating = false
         pendingFinals.removeAll()
