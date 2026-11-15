@@ -41,7 +41,7 @@ The model is [IndexTeam / bilibili's Index-Translate-2B](https://huggingface.co/
 
 > Full walkthrough (with troubleshooting): **[docs/INSTALL-IPAD.md](docs/INSTALL-IPAD.md)**.
 
-1. **Get the ipa** from [Releases](https://github.com/Baizhi-Angelica/IndexTranslate_iPadM5/releases) (`ITXTranslate-unsigned.ipa`; a copy also lives in [`release/`](release/)). It is **unsigned** — you re-sign it with your own Apple ID in the next step.
+1. **Get the ipa** from [Releases](https://github.com/Baizhi-Angelica/IndexTranslate_iPadM5/releases) — the latest `index-translate-v1.0.0-unsigned.ipa`. It is **unsigned** — you re-sign it with your own Apple ID in the next step.
 2. **Install**: on Windows install [iTunes](https://www.apple.com/itunes/download/win64) (or [iCloud for Windows](https://support.apple.com/downloads)) from Apple for the device drivers, then [Sideloadly](https://sideloadly.io/). Connect the iPad, enter your Apple ID, drop the ipa in, press Start. Enable **Settings → Privacy & Security → Developer Mode** on the iPad once and reboot.
 3. **Add a model**: either tap "Download Q4_K_M / Q8_0" inside the app (defaults to the `hf-mirror.com` mirror), or copy the `.gguf` into **Files → On My iPad → index-translate**.
 4. **Grant microphone access and talk**: pick input and output language, tap the microphone, say one sentence.
