@@ -1,0 +1,66 @@
+name: probe speech locales
+
+# 在 macOS 26 上用 Speech 框架列出 SpeechTranscriber 支持/已安装的语言。
+# 目的：上机前确认 zh-CN / en-US 是否被 iOS 26 的 SpeechAnalyzer 支持。
+on:
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: macos-26
+    timeout-minutes: 15
+    steps:
+      - name: Show toolchain
+        run: |
+          sw_vers
+          xcodebuild -version
+
+      - name: Write probe
+        run: |
+          cat > /tmp/probe.swift <<'SWIFT'
+          import Foundation
+          import Speech
+
+          @available(macOS 26.0, *)
+          func probe() async {
+              print("SpeechTranscriber.isAvailable =", SpeechTranscriber.isAvailable)
+              let supported = await SpeechTranscriber.supportedLocales
+              print("supportedLocales count =", supported.count)
+              let supportedIDs = supported.map { $0.identifier }
+              print("SUPPORTED: " + supportedIDs.joined(separator: ", "))
+              let zh = supportedIDs.filter { $0.lowercased().contains("zh") || $0.lowercased().contains("cmn") }
+              let en = supportedIDs.filter { $0.lowercased().hasPrefix("en") }
+              print("ZH_MATCH: " + zh.joined(separator: ", "))
+              print("EN_MATCH: " + en.joined(separator: ", "))
+              let installed = await SpeechTranscriber.installedLocales
+              print("installedLocales count =", installed.count)
+              print("INSTALLED: " + installed.map { $0.identifier }.joined(separator: ", "))
+              if let zhLocale = await SpeechTranscriber.supportedLocale(equivalentTo: Locale(identifier: "zh-CN")) {
+                  print("zh-CN resolves to:", zhLocale.identifier)
+              } else {
+                  print("zh-CN resolves to: nil")
+              }
+              if let enLocale = await SpeechTranscriber.supportedLocale(equivalentTo: Locale(identifier: "en-US")) {
+                  print("en-US resolves to:", enLocale.identifier)
+              } else {
+                  print("en-US resolves to: nil")
+              }
+          }
+
+          @main
+          struct Probe {
+              static func main() async {
+                  if #available(macOS 26.0, *) {
+                      await probe()
+                  } else {
+                      print("macOS 26 not available; cannot probe")
+                  }
+              }
+          }
+          SWIFT
+
+      - name: Build and run
+        run: |
+          set -euo pipefail
+          xcrun swiftc -O /tmp/probe.swift -o /tmp/probe -target arm64-apple-macos26.0 2>&1 | tail -20
+          /tmp/probe
