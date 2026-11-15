@@ -4,6 +4,13 @@ name: Build unsigned IPA
 on:
   push:
     branches: [ main ]
+    # 纯文档 / 回归脚本 / 其他 workflow 的改动不需要重新编 ipa
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'tools/**'
+      - '.github/workflows/probe-speech.yml'
+      - '.github/workflows/diagnose.yml'
   workflow_dispatch:
 
 permissions:

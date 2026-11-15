@@ -62,5 +62,5 @@ jobs:
       - name: Build and run
         run: |
           set -euo pipefail
-          xcrun swiftc -O /tmp/probe.swift -o /tmp/probe -target arm64-apple-macos26.0 2>&1 | tail -20
+          xcrun swiftc -O -parse-as-library /tmp/probe.swift -o /tmp/probe -target arm64-apple-macos26.0 2>&1 | tail -20
           /tmp/probe
