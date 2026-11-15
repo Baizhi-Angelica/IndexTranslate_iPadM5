@@ -69,9 +69,11 @@ final class AppModel: ObservableObject {
     /// 当前识别引擎名（SpeechAnalyzer / SFSpeechRecognizer（降级）），来自 ASRFactory
     @Published var asrEngineName: String = ""
 
-    /// 当前这句译文的原文（上一句搬移时用到；界面在非聆听时显示它）
+    /// 当前这句译文的原文（上一句搬移时用到）
     @Published var sourceText: String = ""
-    /// 上一句译文（连续字幕：上方小一号灰色）
+    /// 当前这句（正在说 / 刚翻译）的原文：原文行只显示这一段，不累积整场
+    @Published var currentSource: String = ""
+    /// 上一句译文（连续字幕：上方同字号灰色）
     @Published var previousTranslation: String = ""
     /// 上一句原文（连续字幕：上方更小一号灰色）
     @Published var previousSource: String = ""
@@ -352,6 +354,8 @@ final class AppModel: ObservableObject {
             var combined: String = finalizedTranscript
             let trimmed: String = text.trimmingCharacters(in: .whitespacesAndNewlines)
             if !trimmed.isEmpty {
+                // 实时 partial 只刷新「当前句原文」的临时显示
+                currentSource = trimmed
                 if !combined.isEmpty {
                     combined += " "
                 }
@@ -363,7 +367,11 @@ final class AppModel: ObservableObject {
             handleFinal(localeID: localeID, text: text)
 
         case let .level(value):
-            level = Double(min(Float(1.0), max(Float(0.0), value)))
+            // 原始 RMS 正常话音只有 0.01–0.05，先转 dB 再映射到 0…1；快起慢落做平滑
+            let rms: Double = Double(max(value, 0.000001))
+            let db: Double = 20.0 * log10(rms)
+            let norm: Double = min(1.0, max(0.0, (db + 55.0) / 55.0))
+            level = max(norm, level * 0.82)
 
         case let .error(message):
             errorMessage = message
@@ -404,6 +412,7 @@ final class AppModel: ObservableObject {
         } else {
             // 手动模式：不配对，直接追加原文并翻译
             let source: SpeechLanguage = SpeechLanguage.detect(from: trimmed)
+            currentSource = trimmed
             appendFinalToTranscript(trimmed, source: source)
             enqueue(text: trimmed, source: source)
         }
@@ -500,6 +509,8 @@ final class AppModel: ObservableObject {
 
         // 源语言以选中文本本身判定（中文识别器路径里也可能是一整句英文）
         let source: SpeechLanguage = SpeechLanguage.detect(from: text)
+        // 选中这一条：它既是原文行当前显示，也是这条翻译 job 的原文
+        currentSource = text
         appendFinalToTranscript(text, source: source)
         enqueue(text: text, source: source)
 
@@ -647,10 +658,13 @@ final class AppModel: ObservableObject {
                     // 连续字幕：先把当前这句搬到「上一句」，再落新的
                     if !self.translation.isEmpty {
                         self.previousTranslation = self.translation
+                        // sourceText 只在上一次译文落地时写过，正好是上一句译文对应的原文
                         self.previousSource = self.sourceText
                     }
                     self.translation = result.text
                     self.sourceText = result.sourceText
+                    // 原句显示与这条译文配对；用户若已在说下一句，后续 partial 会再刷新它
+                    self.currentSource = result.sourceText
                     self.metrics = result.metrics
                     self.lastLatencyMS = result.latencyMS
                 }
@@ -774,6 +788,7 @@ final class AppModel: ObservableObject {
         transcript = ""
         finalizedTranscript = ""
         sourceText = ""
+        currentSource = ""
         previousTranslation = ""
         previousSource = ""
         metrics = ""

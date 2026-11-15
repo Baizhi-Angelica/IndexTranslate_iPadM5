@@ -6,6 +6,7 @@
 //  顶部标题与状态 → 中部译文 / 原文 / 性能 → 底部语言选择 + 麦克风与清空。
 //
 
+import Foundation
 import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
@@ -153,10 +154,10 @@ struct ContentView: View {
         VStack(alignment: .leading, spacing: 8) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 10) {
-                    // 上一句译文：小一号、灰色
+                    // 上一句译文：与当前句同字号，只变灰
                     if !model.previousTranslation.isEmpty {
                         Text(model.previousTranslation)
-                            .font(.system(size: 28, weight: .regular))
+                            .font(.system(size: 40, weight: .semibold))
                             .foregroundStyle(Color.secondary)
                             .lineLimit(2)
                             .minimumScaleFactor(0.6)
@@ -182,8 +183,8 @@ struct ContentView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .textSelection(.enabled)
 
-                    // 当前句原文：18pt 灰色小字
-                    Text(currentSourceText)
+                    // 当前句原文：18pt 灰色小字（只显示这一句，不累积整场）
+                    Text(model.currentSource)
                         .font(.system(size: 18))
                         .foregroundStyle(Color.secondary)
                         .lineLimit(3)
@@ -209,27 +210,6 @@ struct ContentView: View {
             return "正在聆听…"
         }
         return "点下方麦克风开始说话，全部在 iPad 本地运行"
-    }
-
-    private var transcriptPreview: String {
-        let text: String = model.transcript
-        guard !text.isEmpty else { return "" }
-        let maxLength: Int = 160
-        if text.count <= maxLength {
-            return text
-        }
-        return "…" + String(text.suffix(maxLength))
-    }
-
-    /// 当前句原文：聆听时显示实时转写，停下后显示刚翻译那句的原文。
-    private var currentSourceText: String {
-        if model.isListening {
-            return transcriptPreview
-        }
-        if !model.sourceText.isEmpty {
-            return model.sourceText
-        }
-        return transcriptPreview
     }
 
     private var metricsRow: some View {
@@ -300,13 +280,18 @@ struct ContentView: View {
                     .progressViewStyle(.linear)
                     .tint(Color.accentColor)
 
-                Text("正在下载 \(ModelStore.modelFileName)（约 1.22 GB），完成后会自动加载，不用重启 App。")
+                Text("正在下载移动版 \(ModelStore.modelFileName)（基于 Qwen3.5-2B · Q4_K_M 量化，约 1.22 GB），完成后会自动加载，不用重启 App。")
                     .font(.system(size: 14))
                     .foregroundStyle(Color.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             } else {
-                Text("需要模型文件 \(ModelStore.modelFileName)（Q4_K_M 量化，约 1.22 GB）。下载后完全离线运行，音频和文字都不会上传。")
+                Text("需要模型 Index-Translate-2B-Q4_K_M（基于 Qwen3.5-2B · Q4_K_M 量化，约 1.22 GB）。下载后完全离线运行，音频和文字都不会上传。")
                     .font(.system(size: 14))
+                    .foregroundStyle(Color.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Text("官方文件名是 Index-Translate-2B.Q4_K_M.gguf；App 默认拉的是移动版 Index-Translate-2B-Q4_K_M.gguf（不含视觉塔、体积更小），两者都能用。")
+                    .font(.system(size: 13))
                     .foregroundStyle(Color.secondary)
                     .fixedSize(horizontal: false, vertical: true)
 
@@ -448,24 +433,14 @@ struct ContentView: View {
         } label: {
             ZStack {
                 Circle()
-                    .fill(model.isListening ? Color.red.opacity(0.12) : Color(.systemGray6))
+                    .fill(model.isListening ? Color.red : Color(.systemGray5))
                     .frame(width: 108, height: 108)
+                    .shadow(color: model.isListening ? Color.red.opacity(0.35) : Color.clear,
+                            radius: 18)
 
-                if model.isListening {
-                    Circle()
-                        .trim(from: 0.0, to: max(0.03, CGFloat(model.level)))
-                        .stroke(Color.red, style: StrokeStyle(lineWidth: 6, lineCap: .round))
-                        .frame(width: 108, height: 108)
-                        .rotationEffect(Angle(degrees: -90))
-                }
-
-                Circle()
-                    .fill(model.isListening ? Color.red : Color.accentColor)
-                    .frame(width: 86, height: 86)
-
-                Image(systemName: model.isListening ? "mic.slash.fill" : "mic.fill")
-                    .font(.system(size: 32, weight: .semibold))
-                    .foregroundStyle(Color.white)
+                Image(systemName: "mic.fill")
+                    .font(.system(size: 34, weight: .semibold))
+                    .foregroundStyle(model.isListening ? Color.white : Color.secondary)
             }
         }
         .buttonStyle(.plain)
@@ -515,8 +490,49 @@ private struct InfoSheet: View {
                     .font(.system(size: 16, weight: .semibold))
                 }
 
-                infoBlock(title: "模型",
-                          value: model.modelName.isEmpty ? "未加载" : model.modelName)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("模型")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(Color.secondary)
+                    Text("Index-Translate-2B-Q4_K_M")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(Color.primary)
+                    Text("基于 Qwen3.5-2B · Q4_K_M 量化")
+                        .font(.system(size: 12))
+                        .foregroundStyle(Color.secondary)
+                    if !model.modelName.isEmpty {
+                        Text("已加载：" + model.modelName)
+                            .font(.system(size: 12))
+                            .foregroundStyle(Color.secondary.opacity(0.85))
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("相关链接")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(Color.secondary)
+                    if let siteURL = URL(string: "https://index-translate.bilibili.com") {
+                        Link(destination: siteURL) {
+                            Label("模型官网 · index-translate.bilibili.com",
+                                  systemImage: "arrow.up.right.square")
+                                .font(.system(size: 15, weight: .medium))
+                                .foregroundStyle(Color.accentColor)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+                    if let repoURL = URL(string: "https://huggingface.co/IndexTeam/Index-Translate-2B-GGUF") {
+                        Link(destination: repoURL) {
+                            Label("模型仓库 · huggingface.co/IndexTeam/Index-Translate-2B-GGUF",
+                                  systemImage: "arrow.up.right.square")
+                                .font(.system(size: 15, weight: .medium))
+                                .foregroundStyle(Color.accentColor)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+                }
 
                 infoBlock(title: "识别引擎",
                           value: model.asrEngineName.isEmpty ? "未启动" : model.asrEngineName)
@@ -547,7 +563,7 @@ private struct InfoSheet: View {
                     Text("Prompt 说明")
                         .font(.system(size: 17, weight: .semibold))
                         .foregroundStyle(Color.primary)
-                    Text("每句话定稿后，App 用 PromptBuilder.full(text:source:target:) 生成「把这段{源语言}翻译成{目标语言}，只输出译文」的 ChatML 提示词，交给本地 Index-Translate-2B（Q4_K_M）推理；输出再经 PromptBuilder.clean(_:) 去掉思考段、引号和多余空行后显示。全程离线，音频与文字都不会上传。")
+                    Text("每句话定稿后，App 用 PromptBuilder.full(text:source:target:) 生成「把这段{源语言}翻译成{目标语言}，只输出译文」的 ChatML 提示词，交给本地 Index-Translate-2B-Q4_K_M（基于 Qwen3.5-2B，Q4_K_M 量化）推理；输出再经 PromptBuilder.clean(_:) 去掉思考段、引号和多余空行后显示。全程离线，音频与文字都不会上传。")
                         .font(.system(size: 14))
                         .foregroundStyle(Color.secondary)
                         .fixedSize(horizontal: false, vertical: true)

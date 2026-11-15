@@ -11,11 +11,17 @@ enum ModelStore {
 
     // MARK: - 常量
 
-    /// 当前模型文件名
-    static let modelFileName: String = "Index-Translate-2B-Q4_K_M.gguf"
+    /// 官方文件名（IndexTeam/Index-Translate-2B-GGUF 仓库）
+    static let modelFileName: String = "Index-Translate-2B.Q4_K_M.gguf"
 
-    /// 默认下载地址（HuggingFace 镜像，带 ?download=true）
-    static let defaultDownloadURLString: String = "https://hf-mirror.com/mrfakename/Index-Translate-2B-mobile-GGUF/resolve/main/Index-Translate-2B-Q4_K_M.gguf?download=true"
+    /// 兼容旧文件名：早前从 mobile 仓库下的是同名不同哈希（体积一样 1,251.4 MB，实测都能跑）
+    static let legacyModelFileName: String = "Index-Translate-2B-Q4_K_M.gguf"
+
+    /// 默认下载地址：官方 IndexTeam 仓库的 Q4_K_M，走 hf-mirror（国内可达）
+    static let defaultDownloadURLString: String = "https://hf-mirror.com/IndexTeam/Index-Translate-2B-GGUF/resolve/main/Index-Translate-2B.Q4_K_M.gguf?download=true"
+
+    /// 官方直连（不走镜像），镜像不通时可在 App 里粘这个
+    static let officialDownloadURLString: String = "https://huggingface.co/IndexTeam/Index-Translate-2B-GGUF/resolve/main/Index-Translate-2B.Q4_K_M.gguf?download=true"
 
     // MARK: - 位置
 
@@ -37,6 +43,11 @@ enum ModelStore {
         let exactURL: URL = directory.appendingPathComponent(modelFileName, isDirectory: false)
         if fileManager.fileExists(atPath: exactURL.path) {
             return exactURL
+        }
+        // 旧版文件名（mobile 仓库）也认
+        let legacyURL: URL = directory.appendingPathComponent(legacyModelFileName, isDirectory: false)
+        if fileManager.fileExists(atPath: legacyURL.path) {
+            return legacyURL
         }
 
         let keys: [URLResourceKey] = [.fileSizeKey, .isRegularFileKey]
