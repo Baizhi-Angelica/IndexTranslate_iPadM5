@@ -243,19 +243,20 @@ final class AppModel: ObservableObject {
         flushToken += 1
         errorMessage = ""
 
-        if #available(iOS 26.0, *) {
-            asr = SpeechAnalyzerASR()
-        } else {
-            errorMessage = "需要 iPadOS 26 及以上"
-            return
-        }
+        // 优先 iOS 26 的 SpeechAnalyzer；硬件/资源不支持时自动降级到 SFSpeechRecognizer（设备端）
+        let factoryResult: (engine: any ASREngine, name: String) = ASRFactory.make()
+        asr = factoryResult.engine
 
         guard let engine = asr else {
             errorMessage = "语音识别组件初始化失败。"
             return
         }
 
-        let localeIDs: [String] = inputMode.localeIDs
+        var localeIDs: [String] = inputMode.localeIDs
+        if factoryResult.name.contains("降级") && localeIDs.count > 1 {
+            // 降级后端只有一路识别，自动模式退化为默认中文（英文词仍能被中文识别器捕捉）
+            localeIDs = [localeIDs[0]]
+        }
         sessionToken += 1
         let token: Int = sessionToken
         statusText = "正在启动语音识别…"
@@ -269,7 +270,7 @@ final class AppModel: ObservableObject {
             }
             isListening = true
             level = 0
-            statusText = "聆听中…"
+            statusText = "聆听中…（" + factoryResult.name + "）"
             UIApplication.shared.isIdleTimerDisabled = true
         } catch {
             asr = nil
