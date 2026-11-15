@@ -83,12 +83,40 @@ jobs:
           set -euo pipefail
           APP="build/Build/Products/Release-iphoneos/ITXTranslate.app"
           test -d "$APP"
+
+          # llama.framework 是动态库（MH_DYLIB），App 里有 LC_LOAD_DYLIB @rpath/llama.framework/llama
+          # 和 LC_RPATH @executable_path/Frameworks，所以必须把 framework 放进 app/Frameworks。
+          # XcodeGen 的 embed 实测没有生效，这里做确定性拷贝，并用下面的 Verify 步骤兜底。
+          echo "--- products dir ---"
+          ls -la build/Build/Products/Release-iphoneos/ | head -20
+          if [ ! -d "$APP/Frameworks/llama.framework" ]; then
+            echo "framework 未被 Xcode 嵌入，手动拷贝"
+            mkdir -p "$APP/Frameworks"
+            cp -R "build/Build/Products/Release-iphoneos/llama.framework" "$APP/Frameworks/" 2>/dev/null \
+              || cp -R "Frameworks/llama.xcframework/ios-arm64/llama.framework" "$APP/Frameworks/"
+          fi
+          ls -la "$APP/Frameworks/llama.framework"
+
           rm -rf Payload ITXTranslate-unsigned.ipa
           mkdir -p Payload
           cp -R "$APP" Payload/
           zip -qry ITXTranslate-unsigned.ipa Payload
           ls -lh ITXTranslate-unsigned.ipa
           du -sh Payload/ITXTranslate.app
+
+      - name: Verify bundle (防 dyld 崩溃)
+        run: |
+          set -euo pipefail
+          APP="Payload/ITXTranslate.app"
+          test -f "$APP/ITXTranslate"
+          test -f "$APP/Frameworks/llama.framework/llama"
+          size=$(stat -f%z ITXTranslate-unsigned.ipa)
+          echo "ipa bytes: $size"
+          if [ "$size" -lt 3000000 ]; then
+            echo "::error::ipa 太小（$size），llama.framework 很可能没被嵌入"
+            exit 1
+          fi
+          echo "bundle check OK"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
