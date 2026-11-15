@@ -1,0 +1,18 @@
+# 构建产物
+build/
+Payload/
+*.ipa
+*.log
+
+# CI 下载的原生依赖（不提交）
+Frameworks/
+Sources/MT/include/
+
+# Xcode / macOS
+xcuserdata/
+*.xcworkspace/xcuserdata/
+.DS_Store
+
+# 本地临时
+.dsh-tmp/
+tools/out/

@@ -1,0 +1,114 @@
+name: Build unsigned IPA
+
+# 在 macOS runner 上编译 iPad App，产出未签名 ipa；本地 Windows 用 Sideloadly 重签安装。
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: |
+          xcodebuild -version
+          sw_vers
+          echo "--- SDKs ---"
+          xcodebuild -showsdks | tail -20
+
+      - name: Fetch llama.xcframework + headers
+        env:
+          LLAMA_BUILD: b12397
+        run: |
+          set -euo pipefail
+          mkdir -p Frameworks Sources/MT/include
+          curl -fL --retry 3 --retry-delay 2 -o /tmp/llama-xcframework.zip \
+            "https://github.com/ggml-org/llama.cpp/releases/download/${LLAMA_BUILD}/llama-${LLAMA_BUILD}-xcframework.zip"
+          unzip -q /tmp/llama-xcframework.zip -d /tmp/llama
+          cp -R /tmp/llama/build-apple/llama.xcframework Frameworks/
+          cp /tmp/llama/build-apple/llama.xcframework/ios-arm64/llama.framework/Headers/*.h Sources/MT/include/
+          echo "--- framework ---"
+          ls -la Frameworks/llama.xcframework
+          echo "--- headers ---"
+          ls -la Sources/MT/include | head -20
+
+      - name: Install XcodeGen
+        run: |
+          if ! command -v xcodegen >/dev/null 2>&1; then
+            brew install xcodegen
+          fi
+          xcodegen --version
+
+      - name: Generate Xcode project
+        run: |
+          set -euo pipefail
+          xcodegen generate
+          xcodebuild -list -project ITXTranslate.xcodeproj
+
+      - name: Build (unsigned)
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project ITXTranslate.xcodeproj \
+            -scheme ITXTranslate \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build 2>&1 | tee /tmp/build.log
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then
+            echo "=============== 编译失败，错误摘要 ==============="
+            grep -n -E "error:|error;|fatal error|The following build commands failed" /tmp/build.log | head -80 || true
+          fi
+
+      - name: Package IPA
+        run: |
+          set -euo pipefail
+          APP="build/Build/Products/Release-iphoneos/ITXTranslate.app"
+          test -d "$APP"
+          rm -rf Payload ITXTranslate-unsigned.ipa
+          mkdir -p Payload
+          cp -R "$APP" Payload/
+          zip -qry ITXTranslate-unsigned.ipa Payload
+          ls -lh ITXTranslate-unsigned.ipa
+          du -sh Payload/ITXTranslate.app
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ITXTranslate-unsigned-ipa
+          path: ITXTranslate-unsigned.ipa
+          retention-days: 30
+
+      - name: Publish to Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ github.run_number }}
+          name: build-${{ github.run_number }}
+          files: ITXTranslate-unsigned.ipa
+          body: |
+            自动构建的**未签名** IPA。
+            Windows 上用 Sideloadly 登录 Apple ID 重签安装（免费账号 7 天有效）。
+          draft: false
+          prerelease: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload build log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: /tmp/build.log
+          retention-days: 7
