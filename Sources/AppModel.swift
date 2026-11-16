@@ -784,9 +784,15 @@ final class AppModel: ObservableObject {
 
     // MARK: - 模型下载 / 导入
 
-    /// 下载指定模型（urlString 由界面从 ModelStore 的 Q4 / Q8 常量传入）。
+    /// 下载指定模型（urlString 由界面传入，一般用 candidates 版本以获得多源回退）。
     func downloadModel(from urlString: String) {
+        downloadModel(candidates: [urlString])
+    }
+
+    /// 多源下载：按顺序尝试 ModelScope → hf-mirror → HuggingFace，任一成功即可。
+    func downloadModel(candidates: [String]) {
         guard !isDownloading, !isListening else { return }
+        guard !candidates.isEmpty else { return }
         isDownloading = true
         downloadProgress = 0
         errorMessage = ""
@@ -794,7 +800,7 @@ final class AppModel: ObservableObject {
 
         Task { @MainActor in
             do {
-                let savedURL: URL = try await ModelStore.downloadModel(from: urlString) { [weak self] (fraction: Double) in
+                let savedURL: URL = try await ModelStore.downloadModel(candidates: candidates) { [weak self] (fraction: Double) in
                     Task { @MainActor in
                         self?.downloadProgress = min(max(fraction, 0.0), 1.0)
                     }
@@ -820,9 +826,9 @@ final class AppModel: ObservableObject {
         }
     }
 
-    /// 兼容旧调用：默认下载 Q4_K_M。
+    /// 兼容旧调用：默认下载 Q4_K_M（多源回退）。
     func downloadModel() {
-        downloadModel(from: ModelStore.q4DownloadURLString)
+        downloadModel(candidates: ModelStore.q4DownloadCandidates)
     }
 
     /// 文件选择器拿到的 URL 直接交给 ModelStore（安全作用域访问由它处理）。

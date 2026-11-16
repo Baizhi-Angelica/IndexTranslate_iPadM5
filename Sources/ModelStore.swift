@@ -36,11 +36,30 @@ enum ModelStore {
 
     /// Q4_K_M（官方默认档，约 1.22 GB）
     static let q4FileName: String = "Index-Translate-2B.Q4_K_M.gguf"
-    static let q4DownloadURLString: String = "https://hf-mirror.com/IndexTeam/Index-Translate-2B-GGUF/resolve/main/Index-Translate-2B.Q4_K_M.gguf?download=true"
+
+    /// 首选源：ModelScope。国内 CDN 直连（会 302 到 cdn-lfs-cn-1.modelscope.cn），
+    /// 实测支持 Range、文件与官方 HF 完全一致（LFS 哈希 044b313d…，1,312,164,352 字节）。
+    static let q4DownloadURLString: String = "https://www.modelscope.cn/models/IndexTeam/Index-Translate-2B-GGUF/resolve/master/Index-Translate-2B.Q4_K_M.gguf"
+
+    /// 备用源一：hf-mirror（国内镜像）
+    static let hfMirrorQ4URLString: String = "https://hf-mirror.com/IndexTeam/Index-Translate-2B-GGUF/resolve/main/Index-Translate-2B.Q4_K_M.gguf?download=true"
+
+    /// 备用源二：HuggingFace 官方
+    static let hfOfficialQ4URLString: String = "https://huggingface.co/IndexTeam/Index-Translate-2B-GGUF/resolve/main/Index-Translate-2B.Q4_K_M.gguf"
+
+    /// 下载顺序：ModelScope → hf-mirror → HuggingFace
+    static let q4DownloadCandidates: [String] = [q4DownloadURLString, hfMirrorQ4URLString, hfOfficialQ4URLString]
 
     /// Q8_0（官方高质量档，约 2 GB；M 系列实测延迟和 Q4 几乎一样，可直接当默认）
     static let q8FileName: String = "Index-Translate-2B.Q8_0.gguf"
-    static let q8DownloadURLString: String = "https://hf-mirror.com/IndexTeam/Index-Translate-2B-GGUF/resolve/main/Index-Translate-2B.Q8_0.gguf?download=true"
+    static let q8DownloadURLString: String = "https://www.modelscope.cn/models/IndexTeam/Index-Translate-2B-GGUF/resolve/master/Index-Translate-2B.Q8_0.gguf"
+    static let hfMirrorQ8URLString: String = "https://hf-mirror.com/IndexTeam/Index-Translate-2B-GGUF/resolve/main/Index-Translate-2B.Q8_0.gguf?download=true"
+    static let hfOfficialQ8URLString: String = "https://huggingface.co/IndexTeam/Index-Translate-2B-GGUF/resolve/main/Index-Translate-2B.Q8_0.gguf"
+    static let q8DownloadCandidates: [String] = [q8DownloadURLString, hfMirrorQ8URLString, hfOfficialQ8URLString]
+
+    /// 模型页（给「手动下载」用，浏览器打开可直接点下载）
+    static let modelScopePageURLString: String = "https://www.modelscope.cn/models/IndexTeam/Index-Translate-2B-GGUF"
+    static let huggingFacePageURLString: String = "https://huggingface.co/IndexTeam/Index-Translate-2B-GGUF"
 
     /// 官方直连（不走镜像），镜像不通时可在 App 里粘这个
     static let officialDownloadURLString: String = "https://huggingface.co/IndexTeam/Index-Translate-2B-GGUF/resolve/main/Index-Translate-2B.Q4_K_M.gguf?download=true"
@@ -173,6 +192,26 @@ enum ModelStore {
     }
 
     // MARK: - 下载
+
+    /// 依次尝试多个下载源（默认顺序 ModelScope → hf-mirror → HuggingFace），
+    /// 任一成功即返回；全失败时抛出的错误里带上每个源的失败原因，方便在 App 里直接看到。
+    static func downloadModel(candidates: [String],
+                              progress: @escaping @Sendable (Double) -> Void) async throws -> URL {
+        guard !candidates.isEmpty else {
+            throw modelError("没有可用的下载源")
+        }
+        var failures: [String] = []
+        for (index, urlString) in candidates.enumerated() {
+            do {
+                return try await downloadModel(from: urlString, progress: progress)
+            } catch {
+                let host: String = URL(string: urlString)?.host ?? urlString
+                failures.append("源 \(index + 1)（\(host)）：\(error.localizedDescription)")
+                progress(0)
+            }
+        }
+        throw modelError("模型下载失败，已尝试 \(candidates.count) 个源：\n" + failures.joined(separator: "\n"))
+    }
 
     /// 下载模型（URLSession async 版 + 进度回调）。
     /// 目标文件名从 URL 的 lastPathComponent 推导（忽略 ?download=true 这类 query），

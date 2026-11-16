@@ -288,9 +288,9 @@ struct ContentView: View {
 
     // MARK: - 模型缺失 / 下载中卡片
 
-    private func modelDownloadButton(title: String, urlString: String, primary: Bool) -> some View {
+    private func modelDownloadButton(title: String, candidates: [String], primary: Bool) -> some View {
         Button {
-            model.downloadModel(from: urlString)
+            model.downloadModel(candidates: candidates)
         } label: {
             Text(title)
                 .font(.system(size: isCompact ? 14 : 16, weight: .semibold))
@@ -343,19 +343,31 @@ struct ContentView: View {
                 if isCompact {
                     HStack(spacing: 10) {
                         modelDownloadButton(title: "Q4_K_M · 1.25 GB",
-                                            urlString: ModelStore.q4DownloadURLString,
+                                            candidates: ModelStore.q4DownloadCandidates,
                                             primary: false)
                         modelDownloadButton(title: "Q8_0 · 2 GB",
-                                            urlString: ModelStore.q8DownloadURLString,
+                                            candidates: ModelStore.q8DownloadCandidates,
                                             primary: true)
                     }
                 } else {
                     modelDownloadButton(title: "下载 Q4_K_M（约 1.25 GB，省空间）",
-                                        urlString: ModelStore.q4DownloadURLString,
+                                        candidates: ModelStore.q4DownloadCandidates,
                                         primary: false)
                     modelDownloadButton(title: "下载 Q8_0（约 2 GB，质量最好）",
-                                        urlString: ModelStore.q8DownloadURLString,
+                                        candidates: ModelStore.q8DownloadCandidates,
                                         primary: true)
+                }
+
+                Text("下载优先走 ModelScope（国内直连），失败会自动换 hf-mirror / HuggingFace。也可以手动下：Safari 打开 ModelScope 模型页 → 点 Q4_K_M 或 Q8_0 下载 → 在「文件」App 里把它拖进「我的 iPad → index-translate」。")
+                    .font(.system(size: isCompact ? 11 : 13))
+                    .foregroundStyle(Color.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if let msURL: URL = URL(string: ModelStore.modelScopePageURLString) {
+                    Link(destination: msURL) {
+                        Label("ModelScope 模型页（可手动下载）", systemImage: "arrow.up.right.square")
+                            .font(.system(size: isCompact ? 12 : 14, weight: .medium))
+                    }
                 }
 
                 Button {
@@ -628,7 +640,7 @@ private struct InfoSheet: View {
                             .tint(Color.accentColor)
                     } else {
                         Button {
-                            model.downloadModel(from: ModelStore.q4DownloadURLString)
+                            model.downloadModel(candidates: ModelStore.q4DownloadCandidates)
                         } label: {
                             Text("下载 Q4_K_M（约 1.25 GB，省空间）")
                                 .font(.system(size: 15, weight: .medium))
@@ -642,7 +654,7 @@ private struct InfoSheet: View {
                         .disabled(model.isListening)
 
                         Button {
-                            model.downloadModel(from: ModelStore.q8DownloadURLString)
+                            model.downloadModel(candidates: ModelStore.q8DownloadCandidates)
                         } label: {
                             Text("下载 Q8_0（约 2 GB，质量最好）")
                                 .font(.system(size: 15, weight: .semibold))
@@ -654,6 +666,11 @@ private struct InfoSheet: View {
                         }
                         .buttonStyle(.plain)
                         .disabled(model.isListening)
+
+                        Text("优先 ModelScope（国内直连），失败自动换 hf-mirror / HuggingFace。")
+                            .font(.system(size: 12))
+                            .foregroundStyle(Color.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
 
@@ -671,7 +688,17 @@ private struct InfoSheet: View {
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         }
                     }
-                    if let repoURL = URL(string: "https://huggingface.co/IndexTeam/Index-Translate-2B-GGUF") {
+                    if let repoURL = URL(string: ModelStore.modelScopePageURLString) {
+                        Link(destination: repoURL) {
+                            Label("ModelScope 模型页 · modelscope.cn/IndexTeam/Index-Translate-2B-GGUF",
+                                  systemImage: "arrow.up.right.square")
+                                .font(.system(size: 15, weight: .medium))
+                                .foregroundStyle(Color.accentColor)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+                    if let repoURL = URL(string: ModelStore.huggingFacePageURLString) {
                         Link(destination: repoURL) {
                             Label("模型仓库 · huggingface.co/IndexTeam/Index-Translate-2B-GGUF",
                                   systemImage: "arrow.up.right.square")

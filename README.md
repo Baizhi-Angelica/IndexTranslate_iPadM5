@@ -49,7 +49,7 @@
 
 1. **拿到 ipa**：从 [Releases](https://github.com/Baizhi-Angelica/IndexTranslate_iPadM5/releases) 下载最新的 `index-translate-v1.0.0-unsigned.ipa`。这是**未签名**包，下一步用你的 Apple ID 重签。
 2. **装进 iPad**：先从 **Apple 官网**装 [iTunes（Windows）](https://www.apple.com/itunes/download/win64) 或 [iCloud for Windows](https://support.apple.com/zh-cn/downloads)（两者都会装 Apple 设备驱动），再从 <https://sideloadly.io/> 装 Sideloadly；连上 iPad → 填 Apple ID → 拖入 ipa → Start。首次需要在 iPad 的「设置 → 隐私与安全性 → 开发者模式」里打开开发者模式并重启。
-3. **放模型**：二选一——① 打开 App，在模型卡片里点「下载 Q4_K_M / Q8_0」（默认走 `hf-mirror.com` 镜像）；② 用「文件」App 把 `.gguf` 拷进 **我的 iPad → index-translate**，回到 App 会自动发现。
+3. **放模型**：二选一——① 打开 App，在模型卡片里点「下载 Q4_K_M / Q8_0」（**优先 ModelScope 国内直连**，失败自动换 `hf-mirror.com` → `huggingface.co`）；② **手动下载**：Safari 打开 [ModelScope 模型页](https://www.modelscope.cn/models/IndexTeam/Index-Translate-2B-GGUF) → 点 `Index-Translate-2B.Q4_K_M.gguf` 或 `Q8_0` → 在「文件」App 里把它拖进 **我的 iPad → index-translate**，回到 App 会自动发现。
 4. **授权并说话**：允许麦克风 → 选输入语言和输出语言 → 点大圆麦克风按钮 → 说一句中文或英文，定稿后自动翻译。
 
 > 免费 Apple ID 签名的 App **7 天后失效**，到期用 Sideloadly 点一次 Start 重签即可，模型和设置都保留。
@@ -61,10 +61,16 @@
 | **Q4_K_M** | `Index-Translate-2B.Q4_K_M.gguf` | 1,251.4 MB | 166–430 ms | 省空间；较老设备 / iPhone 建议这档 |
 | **Q8_0** | `Index-Translate-2B.Q8_0.gguf` | 1,980.5 MB | 与 Q4 接近（实测几乎相同） | **M 系列 iPad 推荐**，质量更高 |
 
-官方下载地址（手动下载时用；App 内下载默认走 `hf-mirror.com` 镜像）：
+下载源（App 内按这个顺序自动回退，也可以手动下载）：
 
-- Q4_K_M：<https://huggingface.co/IndexTeam/Index-Translate-2B-GGUF/resolve/main/Index-Translate-2B.Q4_K_M.gguf>
-- Q8_0：<https://huggingface.co/IndexTeam/Index-Translate-2B-GGUF/resolve/main/Index-Translate-2B.Q8_0.gguf>
+| 源 | 说明 | 手动下载地址 |
+|---|---|---|
+| **ModelScope**（首选） | 国内 CDN 直连，无需代理 | [模型页](https://www.modelscope.cn/models/IndexTeam/Index-Translate-2B-GGUF) · Q4_K_M 直链 `https://www.modelscope.cn/models/IndexTeam/Index-Translate-2B-GGUF/resolve/master/Index-Translate-2B.Q4_K_M.gguf` |
+| hf-mirror | 国内镜像，ModelScope 不通时回退 | `https://hf-mirror.com/IndexTeam/Index-Translate-2B-GGUF/resolve/main/Index-Translate-2B.Q4_K_M.gguf` |
+| HuggingFace | 官方源，需要能访问 | `https://huggingface.co/IndexTeam/Index-Translate-2B-GGUF/resolve/main/Index-Translate-2B.Q4_K_M.gguf` |
+
+> 手动下载的文件放进 **文件 App → 我的 iPad → index-translate** 即可，App 重启后会自己发现；文件名不必改。
+> ModelScope 上的文件与 HuggingFace 官方完全一致（LFS 哈希 `044b313d…`，1,312,164,352 字节）。
 
 放置目录：**文件 App → 我的 iPad → index-translate**，把 `.gguf` 拷进去即可（可同时放多个）。
 

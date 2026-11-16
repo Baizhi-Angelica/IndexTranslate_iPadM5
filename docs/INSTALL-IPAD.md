@@ -88,14 +88,24 @@ Sideloadly 本身不带驱动，它依赖 Apple 的移动设备驱动（usbmuxd 
 
 | 档位 | 文件名 | 体积 | 下载地址 |
 |---|---|---:|---|
-| **Q4_K_M** | `Index-Translate-2B.Q4_K_M.gguf` | 1,251.4 MB | <https://huggingface.co/IndexTeam/Index-Translate-2B-GGUF/resolve/main/Index-Translate-2B.Q4_K_M.gguf> |
-| **Q8_0** | `Index-Translate-2B.Q8_0.gguf` | 1,980.5 MB | <https://huggingface.co/IndexTeam/Index-Translate-2B-GGUF/resolve/main/Index-Translate-2B.Q8_0.gguf> |
+| **Q4_K_M** | `Index-Translate-2B.Q4_K_M.gguf` | 1,251.4 MB | <https://www.modelscope.cn/models/IndexTeam/Index-Translate-2B-GGUF/resolve/master/Index-Translate-2B.Q4_K_M.gguf> |
+| **Q8_0** | `Index-Translate-2B.Q8_0.gguf` | 1,980.5 MB | <https://www.modelscope.cn/models/IndexTeam/Index-Translate-2B-GGUF/resolve/master/Index-Translate-2B.Q8_0.gguf> |
 
 M 系列 iPad 推荐 **Q8_0**（真机实测延迟与 Q4 几乎一样，质量更高）；较老的设备用 Q4_K_M。
 
 ### A. App 内下载（最省事）
 
-打开 App，在模型卡片里点 **「下载 Q4_K_M」** 或 **「下载 Q8_0」**。默认走 `hf-mirror.com` 镜像，失败时可以在同一面板里改用 huggingface.co 官方地址。
+打开 App，在模型卡片里点 **「下载 Q4_K_M」** 或 **「下载 Q8_0」**。默认走 **ModelScope 国内 CDN**，失败会自动依次回退到 `hf-mirror.com` 和 `huggingface.co`；全部失败时 App 会把每个源的错误原因显示出来。
+
+### B. 手动下载（Safari 里点两下就行）
+
+1. Safari 打开 <https://www.modelscope.cn/models/IndexTeam/Index-Translate-2B-GGUF>
+2. 在「模型文件」列表里点 `Index-Translate-2B.Q4_K_M.gguf`（或 `Q8_0`）→ 下载
+3. 打开「文件」App → **我的 iPad → index-translate**
+4. 把刚下载的 `.gguf` 拖进去（在「下载」文件夹里长按 → 移动）
+5. 回到 App，它会自己发现；没发现就点 ⓘ 面板的「刷新」或重启 App
+
+> 文件名不用改，`Index-Translate-2B.Q4_K_M.gguf` 就是 App 认的官方名。ModelScope 的文件与 HuggingFace 官方逐字节一致（LFS 哈希 `044b313d…`）。
 
 ### B. 用「文件」App 手动放
 

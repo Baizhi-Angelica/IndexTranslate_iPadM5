@@ -18,8 +18,8 @@
 
 脚本只发 HTTP 请求，**不负责起服务、不重启、不杀进程、不占 8089 端口**。当前这台机器上：
 
-- 二进制：`C:\Users\Angelica\Desktop\works\DeepSeek\.dsh-tmp\llama\llama-server.exe`
-- 模型：`C:\Users\Angelica\Desktop\works\DeepSeek\.dsh-tmp\dl\Index-Translate-2B-Q4_K_M.gguf`
+- 二进制：`C:\Users\Angelica\Desktop\works\DeepSeek\.dsh-tmp\deps\llama-windows\llama-server.exe`
+- 模型：`C:\Users\Angelica\Desktop\works\DeepSeek\.dsh-tmp\models\Index-Translate-2B.Q4_K_M.gguf`
 - 当前实例（`GET /props` 记录）：Q4_K_M，`n_ctx=2048`，`total_slots=4`；14:15 启动，现在活着，**不要重复启动**。
 
 确认服务在：
@@ -33,8 +33,8 @@ Invoke-RestMethod http://127.0.0.1:8089/props | Select-Object model_path, total_
 
 ```powershell
 $root = 'C:\Users\Angelica\Desktop\works\DeepSeek'
-& "$root\.dsh-tmp\llama\llama-server.exe" `
-    -m "$root\.dsh-tmp\dl\Index-Translate-2B-Q4_K_M.gguf" `
+& "$root\.dsh-tmp\deps\llama-windows\llama-server.exe" `
+    -m "$root\.dsh-tmp\models\Index-Translate-2B.Q4_K_M.gguf" `
     --host 127.0.0.1 --port 8089 `
     -c 2048 -np 4
 # 有 GPU 想多卸载几层可以加 -ngl 99；只想给这个脚本用，-np 不加也行
