@@ -77,6 +77,9 @@ final class AppModel: ObservableObject {
     @Published var supportedLocalesText: String = ""
     @Published var isDownloading: Bool = false
     @Published var downloadProgress: Double = 0
+    /// 已下载 / 总字节数（服务器没给 Content-Length 时 total 为 0）
+    @Published var downloadReceivedBytes: Int64 = 0
+    @Published var downloadTotalBytes: Int64 = 0
     @Published var lastLatencyMS: Int = 0
 
     /// 实验开关：自动模式同时跑中英双识别器（默认关；单中文识别器实测更好）
@@ -795,16 +798,30 @@ final class AppModel: ObservableObject {
         guard !candidates.isEmpty else { return }
         isDownloading = true
         downloadProgress = 0
+        downloadReceivedBytes = 0
+        downloadTotalBytes = 0
         errorMessage = ""
         statusText = "正在下载模型…"
 
         Task { @MainActor in
             do {
-                let savedURL: URL = try await ModelStore.downloadModel(candidates: candidates) { [weak self] (fraction: Double) in
-                    Task { @MainActor in
-                        self?.downloadProgress = min(max(fraction, 0.0), 1.0)
+                let savedURL: URL = try await ModelStore.downloadModel(
+                    candidates: candidates,
+                    progress: { [weak self] (fraction: Double) in
+                        Task { @MainActor in
+                            self?.downloadProgress = min(max(fraction, 0.0), 1.0)
+                        }
+                    },
+                    bytes: { [weak self] (received: Int64, total: Int64) in
+                        Task { @MainActor in
+                            self?.downloadReceivedBytes = received
+                            self?.downloadTotalBytes = total
+                            if total > 0 {
+                                self?.downloadProgress = min(max(Double(received) / Double(total), 0.0), 1.0)
+                            }
+                        }
                     }
-                }
+                )
                 let savedName: String = savedURL.lastPathComponent
                 self.downloadProgress = 1.0
                 self.isDownloading = false

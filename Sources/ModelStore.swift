@@ -196,14 +196,15 @@ enum ModelStore {
     /// 依次尝试多个下载源（默认顺序 ModelScope → hf-mirror → HuggingFace），
     /// 任一成功即返回；全失败时抛出的错误里带上每个源的失败原因，方便在 App 里直接看到。
     static func downloadModel(candidates: [String],
-                              progress: @escaping @Sendable (Double) -> Void) async throws -> URL {
+                              progress: @escaping @Sendable (Double) -> Void,
+                              bytes: @escaping @Sendable (Int64, Int64) -> Void = { _, _ in }) async throws -> URL {
         guard !candidates.isEmpty else {
             throw modelError("没有可用的下载源")
         }
         var failures: [String] = []
         for (index, urlString) in candidates.enumerated() {
             do {
-                return try await downloadModel(from: urlString, progress: progress)
+                return try await downloadModel(from: urlString, progress: progress, bytes: bytes)
             } catch {
                 let host: String = URL(string: urlString)?.host ?? urlString
                 failures.append("源 \(index + 1)（\(host)）：\(error.localizedDescription)")
@@ -213,12 +214,20 @@ enum ModelStore {
         throw modelError("模型下载失败，已尝试 \(candidates.count) 个源：\n" + failures.joined(separator: "\n"))
     }
 
-    /// 下载模型（URLSession async 版 + 进度回调）。
+    /// 官方文件的字节数（服务器没给 Content-Length 时用来算进度）。
+    private static let knownSizeBytes: [String: Int64] = [
+        "Index-Translate-2B.Q4_K_M.gguf": 1312164352,
+        "Index-Translate-2B.Q8_0.gguf": 2076674560,
+    ]
+
+    /// 下载模型：自己分块收流写盘（不再用 URLSession.download 的 async 版，
+    /// 那条路在真机上不回调 didWriteData，进度条会一直停在 0）。
     /// 目标文件名从 URL 的 lastPathComponent 推导（忽略 ?download=true 这类 query），
     /// 完成后替换 Documents 里的同名文件，并自动选中这个模型。
     /// 失败抛 domain 为 "ITXModelStore" 的中文 NSError。
     static func downloadModel(from urlString: String,
-                              progress: @escaping @Sendable (Double) -> Void) async throws -> URL {
+                              progress: @escaping @Sendable (Double) -> Void,
+                              bytes: @escaping @Sendable (Int64, Int64) -> Void = { _, _ in }) async throws -> URL {
         guard let url: URL = URL(string: urlString),
               let scheme: String = url.scheme?.lowercased(),
               scheme == "https" || scheme == "http" else {
@@ -229,21 +238,24 @@ enum ModelStore {
         let rawName: String = url.lastPathComponent
         let fileName: String = rawName.isEmpty ? modelFileName : sanitizedModelFileName(from: rawName)
 
-        let delegate: ProgressDelegate = ProgressDelegate(progress: progress)
+        let tempURL: URL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("itx-\(UUID().uuidString).part")
 
-        let result: (URL, URLResponse)
+        let downloader: ChunkDownloader
         do {
-            result = try await URLSession.shared.download(from: url, delegate: delegate)
+            downloader = try ChunkDownloader(tempURL: tempURL,
+                                             expected: knownSizeBytes[fileName] ?? 0,
+                                             progress: progress,
+                                             bytes: bytes)
         } catch {
-            throw modelError("模型下载失败：\(error.localizedDescription)")
+            throw modelError("无法创建临时文件：\(error.localizedDescription)")
         }
 
-        let temporaryURL: URL = result.0
-        let response: URLResponse = result.1
-        if let httpResponse: HTTPURLResponse = response as? HTTPURLResponse {
-            if httpResponse.statusCode < 200 || httpResponse.statusCode >= 300 {
-                throw modelError("模型下载失败（HTTP \(httpResponse.statusCode)）")
-            }
+        do {
+            try await downloader.run(url: url)
+        } catch {
+            try? FileManager.default.removeItem(at: tempURL)
+            throw modelError("模型下载失败：\(error.localizedDescription)")
         }
 
         let fileManager: FileManager = FileManager.default
@@ -258,13 +270,14 @@ enum ModelStore {
                 try fileManager.removeItem(at: destination)
             }
             do {
-                try fileManager.moveItem(at: temporaryURL, to: destination)
+                try fileManager.moveItem(at: tempURL, to: destination)
             } catch {
                 // 兜底：跨卷之类 move 失败时改为复制
-                try fileManager.copyItem(at: temporaryURL, to: destination)
-                try? fileManager.removeItem(at: temporaryURL)
+                try fileManager.copyItem(at: tempURL, to: destination)
+                try? fileManager.removeItem(at: tempURL)
             }
         } catch {
+            try? fileManager.removeItem(at: tempURL)
             throw modelError("模型文件保存失败：\(error.localizedDescription)")
         }
 
@@ -325,33 +338,117 @@ enum ModelStore {
                        userInfo: [NSLocalizedDescriptionKey: message])
     }
 
-    /// 下载进度代理。只关心 didWriteData，临时文件的搬运交给 async download 的返回值。
-    private final class ProgressDelegate: NSObject, URLSessionDownloadDelegate {
+    /// 分块下载器：URLSessionDataTask + URLSessionDataDelegate，边收边写盘。
+    /// 用它的原因：`URLSession.download(from:delegate:)` 的 async 版在真机上
+    /// 不回调 didWriteData，导致下载进度一直是 0（用户以为没在下载）。
+    private final class ChunkDownloader: NSObject, URLSessionDataDelegate {
 
-        private let onProgress: @Sendable (Double) -> Void
+        private let tempURL: URL
+        private let expectedFallback: Int64
+        private let progress: @Sendable (Double) -> Void
+        private let bytes: @Sendable (Int64, Int64) -> Void
+        private var handle: FileHandle?
+        private var received: Int64 = 0
+        private var expected: Int64 = 0
+        private var head: Data = Data()
+        private var failure: Error?
+        private var continuation: CheckedContinuation<Void, Error>?
+        private var session: URLSession?
 
-        init(progress: @escaping @Sendable (Double) -> Void) {
-            self.onProgress = progress
+        init(tempURL: URL,
+             expected: Int64,
+             progress: @escaping @Sendable (Double) -> Void,
+             bytes: @escaping @Sendable (Int64, Int64) -> Void) throws {
+            self.tempURL = tempURL
+            self.expectedFallback = expected
+            self.progress = progress
+            self.bytes = bytes
+            self.expected = expected
             super.init()
+            FileManager.default.createFile(atPath: tempURL.path, contents: nil)
+            self.handle = try FileHandle(forWritingTo: tempURL)
+        }
+
+        func run(url: URL) async throws {
+            try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
+                self.continuation = cont
+                var request = URLRequest(url: url)
+                request.timeoutInterval = 60
+                request.setValue("ITXTranslate/1.0 (iOS)", forHTTPHeaderField: "User-Agent")
+                let config: URLSessionConfiguration = URLSessionConfiguration.default
+                config.timeoutIntervalForRequest = 60
+                config.timeoutIntervalForResource = 60 * 60
+                let session: URLSession = URLSession(configuration: config, delegate: self, delegateQueue: nil)
+                self.session = session
+                session.dataTask(with: request).resume()
+            }
+            self.session?.finishTasksAndInvalidate()
+            self.session = nil
+            try? self.handle?.close()
+            self.handle = nil
+
+            if let failure: Error = self.failure {
+                throw failure
+            }
+            // 校验：必须是 GGUF（防止把错误页/登录页当成模型存下来）
+            let magic: String = String(data: self.head.prefix(4), encoding: .ascii) ?? ""
+            guard magic == "GGUF" else {
+                throw ModelStore.modelError("下载到的不是 GGUF 模型文件（可能是错误页），换一个下载源再试")
+            }
+            if self.expected > 0 && self.received < self.expected {
+                throw ModelStore.modelError("下载不完整（\(ModelStore.humanSize(self.received)) / \(ModelStore.humanSize(self.expected))）")
+            }
         }
 
         func urlSession(_ session: URLSession,
-                        downloadTask: URLSessionDownloadTask,
-                        didWriteData bytesWritten: Int64,
-                        totalBytesWritten: Int64,
-                        totalBytesExpectedToWrite: Int64) {
-            if totalBytesExpectedToWrite <= 0 {
+                        dataTask: URLSessionDataTask,
+                        didReceive response: URLResponse,
+                        completionHandler: @escaping (URLSession.ResponseDisposition) -> Void) {
+            if let http: HTTPURLResponse = response as? HTTPURLResponse {
+                if http.statusCode < 200 || http.statusCode >= 300 {
+                    self.failure = ModelStore.modelError("下载失败（HTTP \(http.statusCode)）")
+                    completionHandler(.cancel)
+                    return
+                }
+                if http.expectedContentLength > 0 {
+                    self.expected = http.expectedContentLength
+                }
+            }
+            completionHandler(.allow)
+        }
+
+        func urlSession(_ session: URLSession,
+                        dataTask: URLSessionDataTask,
+                        didReceive data: Data) {
+            guard let handle: FileHandle = self.handle else { return }
+            if self.head.count < 4 {
+                self.head.append(data.prefix(4 - self.head.count))
+            }
+            do {
+                try handle.write(contentsOf: data)
+            } catch {
+                self.failure = ModelStore.modelError("写文件失败：\(error.localizedDescription)")
+                dataTask.cancel()
                 return
             }
-            let fraction: Double = Double(totalBytesWritten) / Double(totalBytesExpectedToWrite)
-            let clamped: Double = min(max(fraction, 0.0), 1.0)
-            self.onProgress(clamped)
+            self.received += Int64(data.count)
+            let total: Int64 = self.expected > 0 ? self.expected : self.expectedFallback
+            if total > 0 {
+                self.progress(min(0.995, Double(self.received) / Double(total)))
+                self.bytes(self.received, total)
+            } else {
+                self.bytes(self.received, 0)
+            }
         }
 
         func urlSession(_ session: URLSession,
-                        downloadTask: URLSessionDownloadTask,
-                        didFinishDownloadingTo location: URL) {
-            // 空实现：async 版 download(from:delegate:) 会把临时文件位置通过返回值给出。
+                        task: URLSessionTask,
+                        didCompleteWithError error: Error?) {
+            if let error: Error = error, self.failure == nil {
+                self.failure = ModelStore.modelError(error.localizedDescription)
+            }
+            self.continuation?.resume()
+            self.continuation = nil
         }
     }
 }

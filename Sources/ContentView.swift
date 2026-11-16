@@ -325,7 +325,7 @@ struct ContentView: View {
                     .progressViewStyle(.linear)
                     .tint(Color.accentColor)
 
-                Text("正在下载模型（Q4_K_M 约 1.25 GB / Q8_0 约 2 GB），完成后会自动加载，不用重启 App。")
+                Text("正在下载：已收到 \(ModelStore.humanSize(model.downloadReceivedBytes))\(model.downloadTotalBytes > 0 ? " / " + ModelStore.humanSize(model.downloadTotalBytes) : "") —— 约 1.25 GB（Q4_K_M）或 2 GB（Q8_0），完成后自动加载，不用重启 App。")
                     .font(.system(size: isCompact ? 13 : 14))
                     .foregroundStyle(Color.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -627,7 +627,9 @@ private struct InfoSheet: View {
                 VStack(alignment: .leading, spacing: 8) {
                     if model.isDownloading {
                         HStack(spacing: 8) {
-                            Text("正在下载模型…")
+                            Text(model.downloadTotalBytes > 0
+                                 ? "正在下载 \(ModelStore.humanSize(model.downloadReceivedBytes)) / \(ModelStore.humanSize(model.downloadTotalBytes))"
+                                 : "正在下载 \(ModelStore.humanSize(model.downloadReceivedBytes))")
                                 .font(.system(size: 13))
                                 .foregroundStyle(Color.secondary)
                             Spacer(minLength: 0)
@@ -782,6 +784,38 @@ private struct InfoSheet: View {
                         .foregroundStyle(Color.red)
                 }
                 .buttonStyle(.plain)
+
+                Divider()
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("关于这个项目")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(Color.primary)
+                    if let repoURL: URL = URL(string: "https://github.com/Baizhi-Angelica/IndexTranslate_iPadM5") {
+                        Link(destination: repoURL) {
+                            Label("GitHub · Baizhi-Angelica/IndexTranslate_iPadM5",
+                                  systemImage: "chevron.left.forwardslash.chevron.right")
+                                .font(.system(size: 15, weight: .medium))
+                                .foregroundStyle(Color.accentColor)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+                    if let videoURL: URL = URL(string: "https://www.bilibili.com/video/BV151sH6EE81") {
+                        Link(destination: videoURL) {
+                            Label("B 站演示视频 · BV151sH6EE81",
+                                  systemImage: "play.rectangle")
+                                .font(.system(size: 15, weight: .medium))
+                                .foregroundStyle(Color.accentColor)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+                    Text("欢迎 star、fork 这个项目，也欢迎在 B 站投币点赞，让更多需要本地语音翻译的人看到。")
+                        .font(.system(size: 13))
+                        .foregroundStyle(Color.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
             .padding(24)
         }
