@@ -1,5 +1,7 @@
 # AGENTS.md
 
+> **动手前先读 [docs/HANDOFF.md](docs/HANDOFF.md)**：现状、为什么这么选、哪些路已证伪、哪些地方其实**没验证过**、下次接手的命令清单。那份是交接给下一个模型/开发者的，语气更直白。
+
 面向自动化 agent 的仓库说明。人类读者请看 [README.md](README.md)；装机照 [docs/INSTALL-IPAD.md](docs/INSTALL-IPAD.md) 执行。
 
 ## 这是什么
@@ -34,17 +36,18 @@
 
 ```
 Sources/Core.swift                  语言枚举 + ASREvent + 接口契约（改契约先改这里）
-Sources/AppModel.swift              状态机：权限 / 模型 / ASR 配对 / 队列（622 行，最复杂）
+Sources/AppModel.swift              状态机：权限 / 模型 / ASR 配对 / 队列（约 950 行，最复杂）
 Sources/ContentView.swift           SwiftUI 界面
 Sources/ASR/SpeechAnalyzerASR.swift SpeechAnalyzer + SpeechTranscriber（iOS 26）
 Sources/MT/Prompts.swift            ChatML / 约束模板 / 术语表抽取 / 输出清洗
 Sources/MT/LlamaTranslator.swift    Swift ↔ C 封装（锁、线程数、GPU 层数）
 Sources/MT/ITXLlama.c               llama.cpp C 桥 + 日志落盘
-Sources/ModelStore.swift            模型定位 / 导入 / 下载（默认 hf-mirror）
+Sources/ModelStore.swift            模型定位 / 导入 / 下载（ModelScope → hf-mirror → HF，自带分块下载器）
 project.yml                         XcodeGen 工程描述（新增源文件不用改，Sources 目录自动收编）
 .github/workflows/build-ipa.yml     构建 → 打 ipa → Verify → 发 prerelease
 tools/(segments|regress_prompts|ab_english).py   本地提示词回归 / A/B
 docs/PLAN.md, docs/PITFALLS.md      决策记录 / 踩坑
+docs/HANDOFF.md                     交接笔记（现状 / 已证伪 / 未验证 / 命令清单）
 ```
 
 ## 常用命令（Windows PowerShell，可直接复制）
