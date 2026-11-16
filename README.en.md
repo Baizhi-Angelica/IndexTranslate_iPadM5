@@ -26,7 +26,7 @@ The model is [IndexTeam / bilibili's Index-Translate-2B](https://huggingface.co/
 | | Feature | Detail |
 |---|---|---|
 | 🎙 | On-device streaming transcription | `SpeechAnalyzer` + `SpeechTranscriber` (iPadOS 26); the system ships 31 locales, this app uses Chinese / English |
-| 🌐 | Input: Chinese / English / Auto | Auto uses the Chinese recognizer by default; the dual-recognizer mode is an experimental switch in the ⓘ panel |
+| 🌐 | Input: any of the 7 languages, or Auto | Auto uses the Chinese recognizer by default; the dual-recognizer mode is an experimental switch in the ⓘ panel |
 | 🗣 | Output: 7 languages | Chinese, English, Japanese, Korean, French, German, Spanish |
 | 📝 | English terms kept verbatim | Identity glossary hard constraint, so `dining hall` / `deadline` / `API` are not paraphrased |
 | 📜 | Continuous subtitles | Previous sentence (grey) + current sentence (black), plus a live "listening" line |

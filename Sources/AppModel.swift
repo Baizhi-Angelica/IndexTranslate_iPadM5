@@ -502,7 +502,8 @@ final class AppModel: ObservableObject {
                 livePartial = ""
                 return
             }
-            let source: SpeechLanguage = SpeechLanguage.detect(from: trimmed)
+            // 手动模式：源语言就是用户选的那个（日/韩/法/德/西 也走这里）
+            let source: SpeechLanguage = inputMode.speechLanguage ?? SpeechLanguage.detect(from: trimmed)
             currentSource = trimmed
             livePartial = ""
             appendFinalToTranscript(trimmed, source: source)
@@ -511,7 +512,8 @@ final class AppModel: ObservableObject {
     }
 
     /// 两路识别器时等待另一路 final 的窗口；到点还没到齐就强制 flush。
-    private static let pairingWindowSeconds: TimeInterval = 1.2
+    /// 0.7s：再等下去用户会觉得"说完了怎么还不收句"（issue #2）。
+    private static let pairingWindowSeconds: TimeInterval = 0.7
 
     /// 两路还没到齐时，按本批 flushDeadline 排一次定时 flush。
     /// flushDeadline 由本批第一条 final 决定，后续 final 不会重置它。
@@ -606,7 +608,8 @@ final class AppModel: ObservableObject {
 
         guard let text = chosenText, !text.isEmpty else { return }
 
-        // 源语言以选中文本本身判定（中文识别器路径里也可能是一整句英文）
+        // 自动模式：源语言以选中文本本身判定（中文识别器路径里也可能是一整句英文）；
+        // 手动模式不会走到这里（见 handleFinal 的 else 分支）。
         let source: SpeechLanguage = SpeechLanguage.detect(from: text)
         // 选中这一条：它既是原文行当前显示，也是这条翻译 job 的原文
         currentSource = text
@@ -706,11 +709,11 @@ final class AppModel: ObservableObject {
             return
         }
 
-        // 目标语言和源语言撞了 → 自动换成另一种（中英互译）
+        // 目标语言和源语言撞了 → 换成默认的另一种（中文 ⇄ 英文；其它源语言默认翻中文）
         var actualTarget: OutputLanguage = target
         if let targetSpeechLanguage = target.speechLanguage,
            targetSpeechLanguage == source {
-            let corrected: OutputLanguage = (source.counterpart == .chinese) ? .chinese : .english
+            let corrected: OutputLanguage = source.counterpart.outputLanguage
             actualTarget = corrected
             target = corrected
             statusText = "已自动切换为 " + corrected.displayName

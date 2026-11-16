@@ -7,65 +7,138 @@ import Foundation
 
 // MARK: - 输入与输出语言
 
-/// 输入模式：手动指定中文/英文，或自动（同时跑两个识别器，按转写文字判定）
+/// 输入模式：自动（zh-CN + en-US 两路，按转写文字判定），或手动指定 7 种输入语言之一
 enum InputMode: String, CaseIterable, Identifiable {
     case chinese
     case english
+    case japanese
+    case korean
+    case french
+    case german
+    case spanish
     case auto
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
-        case .chinese: return "中文"
-        case .english: return "English"
-        case .auto:    return "自动"
+        case .chinese:  return "中文"
+        case .english:  return "English"
+        case .japanese: return "日本語"
+        case .korean:   return "한국어"
+        case .french:   return "Français"
+        case .german:   return "Deutsch"
+        case .spanish:  return "Español"
+        case .auto:     return "自动"
+        }
+    }
+
+    /// 手动模式对应的源语言；自动模式为 nil
+    var speechLanguage: SpeechLanguage? {
+        switch self {
+        case .chinese:  return .chinese
+        case .english:  return .english
+        case .japanese: return .japanese
+        case .korean:   return .korean
+        case .french:   return .french
+        case .german:   return .german
+        case .spanish:  return .spanish
+        case .auto:     return nil
         }
     }
 
     /// 需要启动哪些识别器
     var localeIDs: [String] {
-        switch self {
-        case .chinese: return ["zh-CN"]
-        case .english: return ["en-US"]
-        case .auto:    return ["zh-CN", "en-US"]
+        if let language: SpeechLanguage = speechLanguage {
+            return [language.localeID]
         }
+        // 自动：两路（未开「双识别器」时只用第一路 zh-CN）
+        return [SpeechLanguage.chinese.localeID, SpeechLanguage.english.localeID]
     }
 }
 
-/// 输入语言（转写文本的语种）
+/// 输入语言（转写文本的语种）。7 种都与输出语言一一对应。
 enum SpeechLanguage: String, CaseIterable, Identifiable {
     case chinese
     case english
+    case japanese
+    case korean
+    case french
+    case german
+    case spanish
 
     var id: String { rawValue }
 
+    /// 识别器用的 locale（都在 iPadOS 26 的 supportedLocales 里）
     var localeID: String {
         switch self {
-        case .chinese: return "zh-CN"
-        case .english: return "en-US"
+        case .chinese:  return "zh-CN"
+        case .english:  return "en-US"
+        case .japanese: return "ja-JP"
+        case .korean:   return "ko-KR"
+        case .french:   return "fr-FR"
+        case .german:   return "de-DE"
+        case .spanish:  return "es-ES"
         }
     }
 
-    /// prompt 里用的语言名（模型卡片的写法）
+    /// 界面显示名
+    var displayName: String {
+        switch self {
+        case .chinese:  return "中文"
+        case .english:  return "English"
+        case .japanese: return "日本語"
+        case .korean:   return "한국어"
+        case .french:   return "Français"
+        case .german:   return "Deutsch"
+        case .spanish:  return "Español"
+        }
+    }
+
+    /// prompt 里用的语言名（模型卡片用中文语言名）
     var promptName: String {
         switch self {
-        case .chinese: return "中文"
-        case .english: return "英文"
+        case .chinese:  return "中文"
+        case .english:  return "英文"
+        case .japanese: return "日语"
+        case .korean:   return "韩语"
+        case .french:   return "法语"
+        case .german:   return "德语"
+        case .spanish:  return "西班牙语"
         }
     }
 
-    /// 中英互译时的默认目标
+    /// 对应的输出语言（用于「源 = 目标」时纠正目标）
+    var outputLanguage: OutputLanguage {
+        switch self {
+        case .chinese:  return .chinese
+        case .english:  return .english
+        case .japanese: return .japanese
+        case .korean:   return .korean
+        case .french:   return .french
+        case .german:   return .german
+        case .spanish:  return .spanish
+        }
+    }
+
+    /// 中文 ⇄ 英文；其它语言默认翻成中文（再不行回退英文）
     var counterpart: SpeechLanguage {
         self == .chinese ? .english : .chinese
     }
 
     static func from(localeID: String) -> SpeechLanguage {
-        localeID.lowercased().hasPrefix("zh") ? .chinese : .english
+        let lower: String = localeID.lowercased()
+        if lower.hasPrefix("zh") { return .chinese }
+        if lower.hasPrefix("ja") { return .japanese }
+        if lower.hasPrefix("ko") { return .korean }
+        if lower.hasPrefix("fr") { return .french }
+        if lower.hasPrefix("de") { return .german }
+        if lower.hasPrefix("es") { return .spanish }
+        return .english
     }
 
     /// 依据转写文本判定语种：含汉字 → 中文；否则英文。
-    /// （沿用小米项目的经验：方向锚定转写文本，不靠模型/音频猜语种）
+    /// （只用于「自动」模式的两路配对；手动模式的语言由用户指定，不走这里）
     static func detect(from text: String) -> SpeechLanguage {
         for scalar in text.unicodeScalars where isHan(scalar) {
             return .chinese
@@ -125,7 +198,11 @@ enum OutputLanguage: String, CaseIterable, Identifiable {
         switch self {
         case .chinese:  return .chinese
         case .english:  return .english
-        default:        return nil
+        case .japanese: return .japanese
+        case .korean:   return .korean
+        case .french:   return .french
+        case .german:   return .german
+        case .spanish:  return .spanish
         }
     }
 }

@@ -6,7 +6,7 @@
 
 ## 这是什么
 
-在 **iPad Pro M5（iPadOS 26）** 上跑**全离线**语音翻译：麦克风 → Apple `SpeechAnalyzer`（设备端流式转写）→ `Index-Translate-2B` 移动端 GGUF（Q4_K_M，1.22 GB）→ 译文。输入中文/英文/自动，输出 7 种语言，**中英混说时英文词原样保留**。
+在 **iPad Pro M5（iPadOS 26）** 上跑**全离线**语音翻译：麦克风 → Apple `SpeechAnalyzer`（设备端流式转写）→ `Index-Translate-2B` 移动端 GGUF（Q4_K_M，1.22 GB）→ 译文。输入 7 种语言之一或「自动」（自动只跑 zh-CN + en-US 两路），输出 7 种语言，**中英混说时英文词原样保留**。
 
 本机是 **Windows，没有 Xcode**：iOS 侧改动**无法本地编译**，一律靠 GitHub Actions 的 `macos-26` runner，产物是**未签名 ipa**，再由 Windows 上的 Sideloadly + 免费 Apple ID 重签安装（7 天有效期）。
 
