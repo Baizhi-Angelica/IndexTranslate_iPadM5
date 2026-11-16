@@ -29,7 +29,7 @@ enum InputMode: String, CaseIterable, Identifiable {
         case .french:   return "Français"
         case .german:   return "Deutsch"
         case .spanish:  return "Español"
-        case .auto:     return "自动"
+        case .auto:     return "自动（中/Eng）"
         }
     }
 
