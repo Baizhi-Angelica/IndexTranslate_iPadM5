@@ -9,7 +9,7 @@
 ![model](https://img.shields.io/badge/model-Apache--2.0-blue)
 ![runtime](https://img.shields.io/badge/runtime-llama.cpp-orange)
 ![ui](https://img.shields.io/badge/ui-SwiftUI-purple)
-![release](https://img.shields.io/badge/release-v1.0.0-brightgreen)
+![release](https://img.shields.io/badge/release-v1.1.0-brightgreen)
 
 <img src="docs/images/translation.jpg" width="32%"> <img src="docs/images/listening.jpg" width="32%"> <img src="docs/images/model-picker.jpg" width="32%">
 
@@ -43,11 +43,17 @@
 |---|---|---|
 | <img src="docs/images/translation.jpg" width="100%"> | <img src="docs/images/listening.jpg" width="100%"> | <img src="docs/images/model-picker.jpg" width="100%"> |
 
+输入语言现在有 7 种，下面两张是新增语言的实拍（iPad Pro M5，本地模型，无网络）：
+
+| 输入 English → 输出 日本語 | 输入 Français → 输出 中文 |
+|---|---|
+| <img src="docs/images/input-english-japanese.jpg" width="100%"> | <img src="docs/images/input-french-chinese.jpg" width="100%"> |
+
 ## 快速开始
 
 > 目标是"没有 Mac、只有 Windows 电脑 + 一台 iPad"也能装好。完整版（含排障）见 **[docs/INSTALL-IPAD.md](docs/INSTALL-IPAD.md)**。
 
-1. **拿到 ipa**：从 [Releases](https://github.com/Baizhi-Angelica/IndexTranslate_iPadM5/releases) 下载最新的 `index-translate-v1.0.0-unsigned.ipa`。这是**未签名**包，下一步用你的 Apple ID 重签。
+1. **拿到 ipa**：从 [Releases](https://github.com/Baizhi-Angelica/IndexTranslate_iPadM5/releases) 下载最新的 `index-translate-v1.1.0-unsigned.ipa`。这是**未签名**包，下一步用你的 Apple ID 重签。
 2. **装进 iPad**：先从 **Apple 官网**装 [iTunes（Windows）](https://www.apple.com/itunes/download/win64) 或 [iCloud for Windows](https://support.apple.com/zh-cn/downloads)（两者都会装 Apple 设备驱动），再从 <https://sideloadly.io/> 装 Sideloadly；连上 iPad → 填 Apple ID → 拖入 ipa → Start。首次需要在 iPad 的「设置 → 隐私与安全性 → 开发者模式」里打开开发者模式并重启。
 3. **放模型**：二选一——① 打开 App，在模型卡片里点「下载 Q4_K_M / Q8_0」（**优先 ModelScope 国内直连**，失败自动换 `hf-mirror.com` → `huggingface.co`）；② **手动下载**：Safari 打开 [ModelScope 模型页](https://www.modelscope.cn/models/IndexTeam/Index-Translate-2B-GGUF) → 点 `Index-Translate-2B.Q4_K_M.gguf` 或 `Q8_0` → 在「文件」App 里把它拖进 **我的 iPad → index-translate**，回到 App 会自动发现。
 4. **授权并说话**：允许麦克风 → 选输入语言和输出语言 → 点大圆麦克风按钮 → 说一句中文或英文，定稿后自动翻译。

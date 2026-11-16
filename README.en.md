@@ -9,9 +9,13 @@
 ![model](https://img.shields.io/badge/model-Apache--2.0-blue)
 ![runtime](https://img.shields.io/badge/runtime-llama.cpp-orange)
 ![ui](https://img.shields.io/badge/ui-SwiftUI-purple)
-![release](https://img.shields.io/badge/release-v1.0.0-brightgreen)
+![release](https://img.shields.io/badge/release-v1.1.0-brightgreen)
 
-<img src="docs/images/translation.jpg" width="49%"> <img src="docs/images/listening.jpg" width="49%">
+<img src="docs/images/translation.jpg" width="32%"> <img src="docs/images/listening.jpg" width="32%"> <img src="docs/images/model-picker.jpg" width="32%">
+
+Seven input languages now — English→日本語 and Français→中文, shot on an iPad Pro M5, fully local:
+
+<img src="docs/images/input-english-japanese.jpg" width="49%"> <img src="docs/images/input-french-chinese.jpg" width="49%">
 
 ## What it is
 
@@ -41,7 +45,7 @@ The model is [IndexTeam / bilibili's Index-Translate-2B](https://huggingface.co/
 
 > Full walkthrough (with troubleshooting): **[docs/INSTALL-IPAD.md](docs/INSTALL-IPAD.md)**.
 
-1. **Get the ipa** from [Releases](https://github.com/Baizhi-Angelica/IndexTranslate_iPadM5/releases) — the latest `index-translate-v1.0.0-unsigned.ipa`. It is **unsigned** — you re-sign it with your own Apple ID in the next step.
+1. **Get the ipa** from [Releases](https://github.com/Baizhi-Angelica/IndexTranslate_iPadM5/releases) — the latest `index-translate-v1.1.0-unsigned.ipa`. It is **unsigned** — you re-sign it with your own Apple ID in the next step.
 2. **Install**: on Windows install [iTunes](https://www.apple.com/itunes/download/win64) (or [iCloud for Windows](https://support.apple.com/downloads)) from Apple for the device drivers, then [Sideloadly](https://sideloadly.io/). Connect the iPad, enter your Apple ID, drop the ipa in, press Start. Enable **Settings → Privacy & Security → Developer Mode** on the iPad once and reboot.
 3. **Add a model**: either tap "Download Q4_K_M / Q8_0" inside the app (**ModelScope / China CDN first**, falls back to `hf-mirror.com` then `huggingface.co`), or download it manually from the [ModelScope model page](https://www.modelscope.cn/models/IndexTeam/Index-Translate-2B-GGUF) in Safari and move the `.gguf` into **Files → On My iPad → index-translate**.
 4. **Grant microphone access and talk**: pick input and output language, tap the microphone, say one sentence.

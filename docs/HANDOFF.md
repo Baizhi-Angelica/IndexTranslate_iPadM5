@@ -1,6 +1,6 @@
 # 交接笔记：写给下一个接手这个项目的人（或模型）
 
-> 最后更新：2026-11-16，对应 `index-translate v1.0.2`。
+> 最后更新：2026-11-16 晚，对应 `index-translate v1.1.0`。
 > 先读这份，再读 `AGENTS.md`（硬约束）、`PLAN.md`（决策）、`PITFALLS.md`（踩坑）。
 > 这份的语气会比较直白：它记的是"当时为什么这么做"，以及"哪些地方我其实没把握"。
 
@@ -8,10 +8,10 @@
 
 ## 1. 一句话现状
 
-**iPad Pro M5 上已经有一个能用的、全离线的语音翻译 App**：说中文/英文 → 系统 `SpeechAnalyzer` 转写 → `Index-Translate-2B`（GGUF, llama.cpp + Metal）翻译 → 7 种语言输出，中英混说时英文词原样保留。代码在 GitHub，ipa 在 Releases，装机靠 Windows + Sideloadly + 免费 Apple ID。
+**iPad Pro M5 上已经有一个能用的、全离线的语音翻译 App**：说 7 种语言之一（中/英/日/韩/法/德/西）→ 系统 `SpeechAnalyzer` 转写 → `Index-Translate-2B`（GGUF, llama.cpp + Metal）翻译 → 7 种语言输出，中英混说时英文词原样保留。代码在 GitHub，ipa 在 Releases，装机靠 Windows + Sideloadly + 免费 Apple ID。
 
 - 仓库：<https://github.com/Baizhi-Angelica/IndexTranslate_iPadM5>
-- 最新版：`v1.0.2`（另有 `build-*` 预发布记录每次 CI）
+- 最新版：`v1.1.0`（7 种输入语言 + 配对窗口 0.7 s；另有 `build-*` 与 `v1.1.0-beta.*` 记录测试过程）
 - 演示视频：<https://www.bilibili.com/video/BV151sH6EE81>
 - 前一代（先导实验，Android）：<https://github.com/Baizhi-Angelica/IndexTranslate_OnXiaomi>
 
@@ -80,7 +80,7 @@ Windows（本机）                          GitHub Actions（macos-26 / Xcode 2
 
 别把它们当"已完成"：
 
-1. **自动模式的双识别器**（ⓘ 里那个实验开关）：逻辑写好了（两路到齐或 1200 ms 后按字符集选一路），但只在真机上试过少数几句。默认是关的，默认路径只跑 zh-CN。
+1. **自动模式的双识别器**（ⓘ 里那个实验开关）：逻辑写好了（两路到齐或 700 ms 后按字符集选一路），但只在真机上试过少数几句。默认是关的，默认路径只跑 zh-CN。「自动」在界面上已明确标注为「自动（中/Eng）」，因为它确实只覆盖中英两路。
 2. **SFSpeechRecognizer 降级后端**：`SpeechAnalyzer` 在 macOS VM 上探测为 `isAvailable = false`，真机上是 true，所以降级路径**从没被真实触发过**。要测，可以临时在 `ASRFactory` 里强制返回 `LegacyASR()`。
 3. **下载不完整/断点续传**：现在只有"字节数够不够"的校验，没有断点续传；网络断了要整包重下。
 4. **SHA-256 校验**：官方仓库有 `SHA256SUMS.txt`，App 里没做（下载源可能被中间替换，虽然目前三个源都验过是同一份文件）。
@@ -157,3 +157,38 @@ python make_tts.py; python make_slides.py --force; python make_video.py
 - [ ] 改了 prompt → 跑过 `tools/regress_prompts.py` 与 `tools/ab_english.py` 并记下数字
 - [ ] 改了视频文案 → `script.py` 与成片时间轴（`投稿信息.md`）同步
 - [ ] 新增的"没验证"项，写进本文第 5 节
+
+---
+
+## 10. 2026-11-16 收尾：v1.1.0（7 种输入语言）
+
+这一版把输入语言从 2 种扩到 7 种，并修了两个体验问题。真机已验证的部分：
+
+| 验证项 | 结果 |
+|---|---|
+| English → 日本語 | ✅ 截图见 `docs/images/input-english-japanese.jpg`（prefill 58 tok/1 ms、decode 21 tok/418 ms、50.2 tok/s） |
+| Français → 中文 | ✅ 截图见 `docs/images/input-french-chinese.jpg`（prefill 42 tok/2 ms、decode 9 tok/216 ms、41.7 tok/s） |
+| 中文/English 原路径 | 行为与 1.0.x 一致（自动模式默认仍只跑 zh-CN） |
+| 下载进度条 | 已修（分块下载 + 字节级进度），用户确认"可以下载了" |
+
+**设计取舍**：这 5 种新增源语言用的是**普通 prompt**，只有中文源才套「身份术语表」硬约束。
+所以它们夹带的英文词可能被翻掉——这是有意的简化（避免 prompt 变长、也避免给未经 A/B 的语言套约束）。
+如果以后要把术语表推广到全部源语言，只需改 `PromptBuilder.userPrompt` 里那个 `source == .chinese` 条件，
+但**必须先跑 `tools/ab_english.py` 看数字**，别凭感觉改。
+
+**自动模式**只覆盖 zh-CN + en-US 两路，界面上已标成「自动（中/Eng）」。
+不要把它扩展成"按字符集猜 7 种语言"：日语有汉字、韩语有谚文、法德西都是拉丁字母，
+靠脚本判断会在边界上反复误判，比让用户明确选一个更糟。
+
+**能量 VAD 自切句**：评估过（见第 7 节第 6 条），本轮决定不做。
+
+### 给下一个接手的人
+
+这个项目已经跑到"用户自己愿意天天用"的程度了。接下来的价值不在加功能，而在：
+- 把那 5 种新源语言的**英文词保留**补上（有 A/B 脚本，改完能验证）
+- SHA-256 校验、断点续传（都是小而明确的活）
+- TestFlight（要花钱，但能彻底解决 7 天重签）
+
+改任何东西之前，先跑一遍 `tools/regress_prompts.py` 存个基线，然后才动手。
+这个仓库里"看起来没问题但真机不工作"的坑已经踩过四次（动态库、embed、下载进度、PowerShell 编码），
+**永远先取证，再下结论**。
