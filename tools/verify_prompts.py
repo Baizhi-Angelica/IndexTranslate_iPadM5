@@ -54,6 +54,26 @@ CUSTOM_INSTRUCTIONS = [
 PRESET_TARGETS = ("en", "ja", "it", "ru", "zh")
 CUSTOM_TARGETS = ("en", "ja", "ru")
 
+# Swift 枚举的 rawValue（SpeechLanguage / OutputLanguage），case 里同时保留 ISO 键名供 Python 用
+SOURCE_RAW_VALUE = {"chinese": "chinese", "english": "english"}
+TARGET_RAW_VALUE = {
+    "en": "english", "ja": "japanese", "ko": "korean", "fr": "french",
+    "de": "german", "es": "spanish", "it": "italian", "ru": "russian", "zh": "chinese",
+}
+
+
+def make_case(name: str, source: str, target: str, text: str, instruction: str) -> dict:
+    """case 结构必须与 tools/verify_prompt_swift/PromptVerify.swift 的字段对齐：
+    source/target 用 Swift 枚举 rawValue，targetKey 供 Python 自己拼 prompt。"""
+    return {
+        "name": name,
+        "source": SOURCE_RAW_VALUE[source],
+        "target": TARGET_RAW_VALUE[target],
+        "targetKey": target,
+        "text": text,
+        "instruction": instruction,
+    }
+
 
 def _segment_with_terms(segment: dict) -> dict:
     """补齐 english_terms（合成语料没写，按 App 的规则抽出来）。"""
@@ -73,13 +93,8 @@ def build_cases() -> list:
     # 1) 默认路径（无翻译需求）：每条语料 × 每个合法目标语言
     for segment in all_segments:
         for target in prompts.TARGETS_BY_SOURCE[segment["source"]]:
-            cases.append({
-                "name": "default/%s/%s" % (segment["id"], target),
-                "source": segment["source"],
-                "target": target,
-                "text": segment["text"],
-                "instruction": "",
-            })
+            cases.append(make_case("default/%s/%s" % (segment["id"], target),
+                                   segment["source"], target, segment["text"], ""))
 
     # 2) 内置场景：语料子集 × 几个方向（覆盖术语表 + 非术语表 + 新增语言）
     subset = [segment for segment in all_segments
@@ -91,13 +106,9 @@ def build_cases() -> list:
             for target in PRESET_TARGETS:
                 if target not in prompts.TARGETS_BY_SOURCE[segment["source"]]:
                     continue
-                cases.append({
-                    "name": "preset/%s/%s/%s" % (preset_name, segment["id"], target),
-                    "source": segment["source"],
-                    "target": target,
-                    "text": segment["text"],
-                    "instruction": instruction,
-                })
+                cases.append(make_case(
+                    "preset/%s/%s/%s" % (preset_name, segment["id"], target),
+                    segment["source"], target, segment["text"], instruction))
 
     # 3) 自定义需求：验证多行 / 序号 / 自带标签 / 纯空白
     for index, instruction in enumerate(CUSTOM_INSTRUCTIONS):
@@ -106,13 +117,9 @@ def build_cases() -> list:
             for target in CUSTOM_TARGETS:
                 if target not in prompts.TARGETS_BY_SOURCE[segment_data["source"]]:
                     continue
-                cases.append({
-                    "name": "custom/%d/%s/%s" % (index, segment_data["id"], target),
-                    "source": segment_data["source"],
-                    "target": target,
-                    "text": segment_data["text"],
-                    "instruction": instruction,
-                })
+                cases.append(make_case(
+                    "custom/%d/%s/%s" % (index, segment_data["id"], target),
+                    segment_data["source"], target, segment_data["text"], instruction))
 
     return cases
 
@@ -126,7 +133,7 @@ def build_expected(cases: list) -> list:
             "text": case["text"],
             "english_terms": prompts.extract_english_terms(case["text"]),
         }
-        prompt = prompts.build_prompt(segment, case["target"], case["instruction"])
+        prompt = prompts.build_prompt(segment, case["targetKey"], case["instruction"])
         expected.append({"name": case["name"], "prompt": prompt})
     return expected
 
