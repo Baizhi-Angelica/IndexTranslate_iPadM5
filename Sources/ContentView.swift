@@ -539,20 +539,24 @@ private struct InfoSheet: View {
     @State private var copyToken: Int = 0
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                HStack(alignment: .center) {
-                    Text("关于")
-                        .font(.system(size: 24, weight: .bold))
-                        .foregroundStyle(Color.primary)
-                    Spacer(minLength: 8)
-                    Button("完成") {
-                        dismiss()
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    HStack(alignment: .center) {
+                        Text("关于")
+                            .font(.system(size: 24, weight: .bold))
+                            .foregroundStyle(Color.primary)
+                        Spacer(minLength: 8)
+                        Button("完成") {
+                            dismiss()
+                        }
+                        .font(.system(size: 16, weight: .semibold))
                     }
-                    .font(.system(size: 16, weight: .semibold))
-                }
 
-                // 模型：当前选择、引导、已安装列表、下载
+                    // 翻译需求：一级菜单只显示已选/已输入的内容，点进二级页面选择或输入
+                    instructionSection
+
+                    // 模型：当前选择、引导、已安装列表、下载
                 VStack(alignment: .leading, spacing: 8) {
                     Text("模型")
                         .font(.system(size: 14, weight: .semibold))
@@ -741,7 +745,7 @@ private struct InfoSheet: View {
                     Text("Prompt 说明")
                         .font(.system(size: 17, weight: .semibold))
                         .foregroundStyle(Color.primary)
-                    Text("每句话定稿后，App 用 PromptBuilder.full(text:source:target:) 生成「把这段{源语言}翻译成{目标语言}，只输出译文」的 ChatML 提示词，交给本地 Index-Translate-2B（基于 Qwen3.5-2B，Q4_K_M / Q8_0 量化）推理；输出再经 PromptBuilder.clean(_:) 去掉思考段、引号和多余空行后显示。全程离线，音频与文字都不会上传。")
+                    Text("每句话定稿后，App 用 PromptBuilder.full(text:source:target:instruction:) 生成「把这段{源语言}翻译成{目标语言}，只输出译文」的 ChatML 提示词，交给本地 Index-Translate-2B（基于 Qwen3.5-2B，Q4_K_M / Q8_0 量化）推理；输出再经 PromptBuilder.clean(_:) 去掉思考段、引号和多余空行后显示。若设置了翻译需求，会按官方 instTrans 格式额外加一条【注意】约束（中文源→非英语时身份术语表仍是第一条【硬性要求】）。全程离线，音频与文字都不会上传。")
                         .font(.system(size: 14))
                         .foregroundStyle(Color.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -819,8 +823,53 @@ private struct InfoSheet: View {
             }
             .padding(24)
         }
-        .onAppear {
-            model.refreshModels()
+        .toolbar(.hidden, for: .navigationBar)
+            .onAppear {
+                model.refreshModels()
+            }
+        }
+    }
+
+    // MARK: 翻译需求（一级菜单：只显示已选/已输入的内容）
+
+    private var instructionSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("翻译需求")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(Color.secondary)
+
+            NavigationLink {
+                InstructionPickerView(model: model)
+            } label: {
+                HStack(spacing: 12) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(model.instructionDisplayText)
+                            .font(.system(size: 17, weight: .medium))
+                            .foregroundStyle(Color.primary)
+                            .lineLimit(2)
+                            .multilineTextAlignment(.leading)
+                        Text("选择说话场景或写自己的要求，会作为【注意】约束加进 prompt")
+                            .font(.system(size: 12))
+                            .foregroundStyle(Color.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer(minLength: 0)
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(Color.secondary)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 11)
+                .background(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(Color(.systemGray6)))
+            }
+            .buttonStyle(.plain)
+
+            Text(model.saveInstruction
+                 ? "已勾选保存：下次启动仍会用这条需求。"
+                 : "未勾选保存：退出 App 后这条需求会被清空。")
+                .font(.system(size: 12))
+                .foregroundStyle(Color.secondary)
         }
     }
 
@@ -849,5 +898,189 @@ private struct InfoSheet: View {
                 .foregroundStyle(Color.primary)
                 .fixedSize(horizontal: false, vertical: true)
         }
+    }
+}
+
+// MARK: - 翻译需求（二级页面：选择场景 / 自定义 / 保存）
+
+private struct InstructionPickerView: View {
+
+    @ObservedObject var model: AppModel
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 22) {
+                sceneSection
+                customSection
+                saveSection
+                promptPreviewSection
+            }
+            .padding(24)
+        }
+        .navigationTitle("翻译需求")
+        .navigationBarTitleDisplayMode(.inline)
+        .scrollDismissesKeyboard(.interactively)
+    }
+
+    // MARK: 场景（单选，和自定义二选一）
+
+    private var sceneSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("选一个场景")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(Color.primary)
+
+            optionRow(title: "默认（不额外要求）",
+                      detail: "不加任何额外要求，和以前完全一样",
+                      selected: model.activeInstruction.isEmpty) {
+                model.clearTranslationInstruction()
+            }
+
+            ForEach(TranslationInstructionPreset.allCases) { (preset: TranslationInstructionPreset) in
+                optionRow(title: preset.title,
+                          detail: preset.instruction,
+                          selected: model.selectedInstructionPreset == preset) {
+                    model.selectInstructionPreset(preset)
+                }
+            }
+        }
+    }
+
+    private func optionRow(title: String, detail: String, selected: Bool,
+                           action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 19, weight: .regular))
+                    .foregroundStyle(selected ? Color.accentColor : Color.secondary)
+                    .padding(.top, 1)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(title)
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundStyle(Color.primary)
+                        .multilineTextAlignment(.leading)
+                    Text(detail)
+                        .font(.system(size: 12))
+                        .foregroundStyle(Color.secondary)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(selected ? Color.accentColor.opacity(0.10) : Color(.systemGray6)))
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: 自定义需求
+
+    private var customSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("或者写自己的需求")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(Color.primary)
+
+            ZStack(alignment: .topLeading) {
+                TextEditor(text: Binding(
+                    get: { model.translationInstruction },
+                    set: { (text: String) in model.updateTranslationInstruction(text) }
+                ))
+                .font(.system(size: 15))
+                .scrollContentBackground(.hidden)
+                .frame(minHeight: 96)
+                .padding(8)
+                .background(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(Color(.systemGray6)))
+
+                if model.translationInstruction.isEmpty {
+                    Text("例如：回答要简短；称呼对方为「老师」；数字保留阿拉伯数字。")
+                        .font(.system(size: 15))
+                        .foregroundStyle(Color.secondary.opacity(0.7))
+                        .padding(.horizontal, 13)
+                        .padding(.vertical, 16)
+                        .allowsHitTesting(false)
+                }
+            }
+            .frame(minHeight: 96)
+
+            Text("和上面的场景二选一：点场景会覆盖这里的文字；改了这里的文字就变成「自定义」。")
+                .font(.system(size: 12))
+                .foregroundStyle(Color.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    // MARK: 保存（☑️ + 蓝色文字）
+
+    private var saveSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Button {
+                model.setSaveInstruction(!model.saveInstruction)
+            } label: {
+                HStack(alignment: .top, spacing: 10) {
+                    Image(systemName: model.saveInstruction ? "checkmark.square.fill" : "square")
+                        .font(.system(size: 23, weight: .medium))
+                        .foregroundStyle(model.saveInstruction ? Color.accentColor : Color.secondary)
+                    Text("保存这次的需求，下次默认使用")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(Color.blue)
+                        .multilineTextAlignment(.leading)
+                    Spacer(minLength: 0)
+                }
+            }
+            .buttonStyle(.plain)
+
+            Text("不勾选（默认）：这条需求只在本次打开 App 期间生效，退出就清空。勾选后写入本机，下次打开自动沿用；随时可以回来取消。")
+                .font(.system(size: 12))
+                .foregroundStyle(Color.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 10, style: .continuous)
+            .fill(Color(.systemGray6)))
+    }
+
+    // MARK: 实际进 prompt 的约束预览
+
+    private var promptPreviewSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("实际加进 prompt 的约束")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(Color.primary)
+
+            let lines: [String] = PromptBuilder.constraintLines(from: model.translationInstruction)
+            if lines.isEmpty {
+                Text("无（走默认 prompt，不加额外约束）")
+                    .font(.system(size: 13))
+                    .foregroundStyle(Color.secondary)
+            } else {
+                Text(renderedConstraints(lines))
+                    .font(.system(size: 13))
+                    .foregroundStyle(Color.primary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Text("中文 → 非英语目标时，这条【注意】前面还会自动加一条【硬性要求】专名/术语对照，保证英文词原样保留。")
+                .font(.system(size: 12))
+                .foregroundStyle(Color.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 10, style: .continuous)
+            .fill(Color(.systemGray6).opacity(0.6)))
+    }
+
+    private func renderedConstraints(_ lines: [String]) -> String {
+        var numbered: [String] = []
+        for (index, line) in lines.enumerated() {
+            numbered.append(String(index + 1) + ". " + line)
+        }
+        return numbered.joined(separator: "\n")
     }
 }

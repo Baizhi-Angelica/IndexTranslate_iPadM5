@@ -103,6 +103,15 @@ final class AppModel: ObservableObject {
     /// 上一句原文（连续字幕：上方更小一号灰色）
     @Published var previousSource: String = ""
 
+    // MARK: 翻译需求（ⓘ → 翻译需求）
+
+    /// 用户在「翻译需求」二级页面里选/写的内容原文（可能含换行；空 = 不额外要求）。
+    /// 只影响下一次进队列的翻译：进 prompt 的约束 = 每行渲染成 `【注意】…`（见 PromptBuilder）。
+    @Published var translationInstruction: String = ""
+    /// 「保存这次的需求，下次默认使用」是否勾选；只有勾选才写 UserDefaults。
+    /// 不勾选时退出 App 即丢弃（下次启动回到默认）——对应 issue #4 的要求。
+    @Published var saveInstruction: Bool = false
+
     // 过程状态（界面用于隐藏/显示加载卡片与“翻译中”指示）
     @Published var isLoadingModel: Bool = true
     @Published var isTranslating: Bool = false
@@ -153,6 +162,9 @@ final class AppModel: ObservableObject {
 
     /// 请求麦克风权限 → 找模型并加载 → 读取系统语音识别支持的语言。
     func bootstrap() async {
+        // 恢复「翻译需求」：只有上次勾了保存才有；否则默认空（issue #4 的「每次退出清空」）
+        loadSavedInstruction()
+
         // 启动时先弹一次系统麦克风授权；真正点“开始聆听”时还会再校验一次
         _ = await AppModel.requestMicPermission()
 
@@ -737,7 +749,9 @@ final class AppModel: ObservableObject {
         let currentGeneration: Int = generation
 
         let translator: LlamaTranslator = self.translator
-        let prompt: String = PromptBuilder.full(text: job.text, source: job.source, target: job.target)
+        // 翻译需求在「取任务」这一刻快照下来：之后用户改了需求，不影响已在跑的这句。
+        let prompt: String = PromptBuilder.full(text: job.text, source: job.source, target: job.target,
+                                                instruction: self.activeInstruction)
         let jobSourceText: String = job.text
         let maxTokens: Int32 = 192
 
@@ -903,6 +917,81 @@ final class AppModel: ObservableObject {
         target = language
     }
 
+    // MARK: - 翻译需求（ⓘ → 翻译需求）
+
+    /// 真正会进 prompt 的需求（去掉首尾空白后；空字符串 = 不加约束）
+    var activeInstruction: String {
+        return translationInstruction.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// ⓘ 一级菜单里这一行显示的文字：只显示已选/已输入的内容
+    var instructionDisplayText: String {
+        let active: String = activeInstruction
+        if active.isEmpty {
+            return "默认（不额外要求）"
+        }
+        if let preset: TranslationInstructionPreset = TranslationInstructionPreset.matching(active) {
+            return preset.title
+        }
+        let preview: String = active.replacingOccurrences(of: "\n", with: " ")
+        if preview.count <= 18 {
+            return "自定义：" + preview
+        }
+        return "自定义：" + String(preview.prefix(18)) + "…"
+    }
+
+    /// 当前文本命中的内置场景（二级页面打勾用）
+    var selectedInstructionPreset: TranslationInstructionPreset? {
+        return TranslationInstructionPreset.matching(activeInstruction)
+    }
+
+    /// 从 UserDefaults 恢复「已保存」的需求；没勾保存就保持空（每次启动默认清空）。
+    private func loadSavedInstruction() {
+        let defaults: UserDefaults = UserDefaults.standard
+        let saved: Bool = defaults.bool(forKey: TranslationInstructionStore.saveKey)
+        saveInstruction = saved
+        if saved {
+            translationInstruction = defaults.string(forKey: TranslationInstructionStore.textKey) ?? ""
+        } else {
+            translationInstruction = ""
+        }
+    }
+
+    /// 文本编辑（自定义需求、选中场景都走这里）；「保存」开着时同步落盘。
+    func updateTranslationInstruction(_ text: String) {
+        translationInstruction = text
+        persistInstructionIfNeeded()
+    }
+
+    /// 选中内置场景 = 把文本设成该场景的约束文本
+    func selectInstructionPreset(_ preset: TranslationInstructionPreset) {
+        updateTranslationInstruction(preset.instruction)
+    }
+
+    /// 清空需求（回到「默认」）
+    func clearTranslationInstruction() {
+        updateTranslationInstruction("")
+    }
+
+    /// 勾选 / 取消「保存这次的需求，下次默认使用」。
+    /// 勾选 = 立刻写入 UserDefaults；取消 = 删掉，下次启动回到默认。
+    func setSaveInstruction(_ on: Bool) {
+        saveInstruction = on
+        let defaults: UserDefaults = UserDefaults.standard
+        if on {
+            defaults.set(activeInstruction, forKey: TranslationInstructionStore.textKey)
+            defaults.set(true, forKey: TranslationInstructionStore.saveKey)
+        } else {
+            defaults.removeObject(forKey: TranslationInstructionStore.textKey)
+            defaults.removeObject(forKey: TranslationInstructionStore.saveKey)
+        }
+    }
+
+    private func persistInstructionIfNeeded() {
+        guard saveInstruction else { return }
+        UserDefaults.standard.set(activeInstruction, forKey: TranslationInstructionStore.textKey)
+    }
+
     // MARK: - 其它
 
     /// 「复制诊断」用的多行文本。
@@ -920,6 +1009,8 @@ final class AppModel: ObservableObject {
         }
         lines.append("输入：" + inputText)
         lines.append("输出：" + target.displayName)
+        lines.append("翻译需求：" + (activeInstruction.isEmpty ? "未设置" : activeInstruction))
+        lines.append("需求保存：" + (saveInstruction ? "已勾选（下次启动沿用）" : "未勾选（退出即清空）"))
         lines.append("metrics：" + (metrics.isEmpty ? "暂无" : metrics))
         lines.append("延迟：" + (lastLatencyMS > 0 ? String(lastLatencyMS) + " ms" : "暂无"))
         lines.append("错误：" + (errorMessage.isEmpty ? "无" : errorMessage))

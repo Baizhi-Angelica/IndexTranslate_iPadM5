@@ -8,7 +8,9 @@
 //  * Qwen ChatML 模板；
 //  * 关闭 thinking：assistant 回合后紧跟空的 <think></think>；
 //  * 中文 → 非英语：使用模型卡片的"约束翻译"格式，并把源文里的英文片段抽成
-//    身份术语表（X→X）——这是实测最有效的"英文原样保留"手段。
+//    身份术语表（X→X）——这是实测最有效的"英文原样保留"手段；
+//  * 翻译需求（instruction）：用户在 ⓘ 里选的场景/自定义文本，按官方 instTrans
+//    格式渲染成 `【注意】…` 约束行；为空时完全不改变原 prompt（回归基线不变）。
 //
 
 import Foundation
@@ -29,33 +31,90 @@ enum PromptBuilder {
     // MARK: - user 内容
 
     /// 构造 user 回合内容。
-    /// 中文 → 非英语时走模型卡片的"约束翻译"格式，并把源文里的英文片段抽成
-    /// **身份术语表**（`X→X`）——实测这比"请保留英文"这类软约束强得多：
-    /// 按词保留率 52.3% → 99.2%，整句全中率 25% → 97.9%（见 tools/out/ab_english.md）。
-    /// 其余情况（含目标为英语、源文为英语）走通用翻译格式。
-    static func userPrompt(text: String, source: SpeechLanguage, target: OutputLanguage) -> String {
-        if source == .chinese && target != .english {
-            let terms: [String] = englishTerms(in: text)
-            let header: String = "请将以下中文文本翻译成" + target.promptName + "，并且严格遵循所有约束要求。"
-            let sourcePart: String = "【源文】\n" + text
+    ///
+    /// 三种情况：
+    /// 1. 无翻译需求 + 中文 → 非英语：走模型卡片的"约束翻译"格式，并把源文里的英文片段抽成
+    ///    **身份术语表**（`X→X`）——实测这比"请保留英文"这类软约束强得多：
+    ///    按词保留率 52.3% → 99.2%，整句全中率 25% → 97.9%（见 tools/out/ab_english.md）。
+    /// 2. 无翻译需求 + 其它方向：走通用翻译格式（与改动前逐字节一致，prompt 回归基线以此为准）。
+    /// 3. 有翻译需求（instruction 非空）：一律走约束格式，把需求按官方 build_prompt 的规则
+    ///    渲染成 `【注意】…` 行（中文源→非英语时身份术语表排在第一条【硬性要求】）——
+    ///    格式见 https://github.com/bilibili/Index-Translate/blob/main/inference/llm/call_api.py。
+    static func userPrompt(text: String, source: SpeechLanguage, target: OutputLanguage,
+                           instruction: String = "") -> String {
+        let instructionLines: [String] = constraintLines(from: instruction)
+        let usesGlossary: Bool = source == .chinese && target != .english
 
-            let rulesPart: String
+        // 没有任何约束需求 → 保持原来的通用模板（不给 prompt 增重）
+        if !usesGlossary && instructionLines.isEmpty {
+            return "请将以下" + source.promptName + "文本翻译为" + target.promptName
+                + "，直接输出翻译结果，不要进行任何解释。\n\n" + text
+        }
+
+        var constraints: [String] = []
+        if usesGlossary {
+            let terms: [String] = englishTerms(in: text)
             if terms.isEmpty {
-                rulesPart = "1. 【硬性要求】保留源文中的英文单词、专有名词、品牌名和缩写原样输出，不要翻译、不要改写、不要音译。\n"
-                    + "2. 【注意】自然口语风格。"
+                constraints.append("【硬性要求】保留源文中的英文单词、专有名词、品牌名和缩写原样输出，不要翻译、不要改写、不要音译。")
             } else {
                 let pairs: [String] = terms.map { (term: String) -> String in
                     return term + "→" + term
                 }
-                rulesPart = "1. 【硬性要求】专名/术语对照: " + pairs.joined(separator: "、") + "\n"
-                    + "2. 【注意】自然口语风格。"
+                constraints.append("【硬性要求】专名/术语对照: " + pairs.joined(separator: "、"))
             }
-
-            let footer: String = "只输出译文，不要有任何额外说明。"
-            return header + "\n\n" + sourcePart + "\n\n【约束要求】\n" + rulesPart + "\n\n" + footer
         }
 
-        return "请将以下" + source.promptName + "文本翻译为" + target.promptName + "，直接输出翻译结果，不要进行任何解释。\n\n" + text
+        if instructionLines.isEmpty {
+            // 原行为：中文源→非英语时补一条默认风格要求
+            constraints.append("【注意】自然口语风格。")
+        } else {
+            constraints.append(contentsOf: instructionLines)
+        }
+
+        let header: String = "请将以下" + source.promptName + "文本翻译成" + target.promptName
+            + "，并且严格遵循所有约束要求。"
+        let sourcePart: String = "【源文】\n" + text
+        var numbered: [String] = []
+        numbered.reserveCapacity(constraints.count)
+        for (index, constraint) in constraints.enumerated() {
+            numbered.append(String(index + 1) + ". " + constraint)
+        }
+        let rulesPart: String = numbered.joined(separator: "\n")
+        let footer: String = "只输出译文，不要有任何额外说明。"
+        return header + "\n\n" + sourcePart + "\n\n【约束要求】\n" + rulesPart + "\n\n" + footer
+    }
+
+    /// 把用户/场景写的「翻译需求」渲染成约束行（与官方 build_prompt 一致）：
+    /// * 按行拆分，空行丢弃；
+    /// * 去掉行首的序号（`1.` / `2.` / 空格）；
+    /// * 已经开始于【硬性要求】/【注意】/【软性要求】的行原样保留，其余补 `【注意】`。
+    static func constraintLines(from instruction: String) -> [String] {
+        let trimmed: String = instruction.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return [] }
+
+        var lines: [String] = []
+        let rawLines: [String] = trimmed.components(separatedBy: .newlines)
+        for rawLine in rawLines {
+            var line: String = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
+            if line.isEmpty { continue }
+            line = strippingLeadingNumbering(line)
+            if line.isEmpty { continue }
+            if line.hasPrefix("【硬性要求】") || line.hasPrefix("【注意】") || line.hasPrefix("【软性要求】") {
+                lines.append(line)
+            } else {
+                lines.append("【注意】" + line)
+            }
+        }
+        return lines
+    }
+
+    /// 去掉行首的阿拉伯数字 / 点 / 空格（对应官方 `lstrip("0123456789. ")`）。
+    private static func strippingLeadingNumbering(_ line: String) -> String {
+        var result: String = line
+        while let first: Character = result.first, "0123456789. ".contains(first) {
+            result.removeFirst()
+        }
+        return result.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// 抽取源文里的英文片段（连续拉丁词，允许中间空格 / 连字符 / 撇号 / 点 / &），
@@ -95,8 +154,11 @@ enum PromptBuilder {
     }
 
     /// 完整 prompt：user 内容 + ChatML 包装。
-    static func full(text: String, source: SpeechLanguage, target: OutputLanguage) -> String {
-        let content: String = userPrompt(text: text, source: source, target: target)
+    /// `instruction` 为用户在 ⓘ → 翻译需求 里选/写的内容（空字符串 = 不加需求）。
+    static func full(text: String, source: SpeechLanguage, target: OutputLanguage,
+                     instruction: String = "") -> String {
+        let content: String = userPrompt(text: text, source: source, target: target,
+                                         instruction: instruction)
         return chat(content)
     }
 

@@ -1,0 +1,48 @@
+name: verify prompt bytes
+
+# 校验 Swift 的 PromptBuilder（App 实际拼的 prompt）与 tools/ 里的 Python 镜像逐字节一致。
+# 为什么值得单独一条：prompt 回归/A-B 数字全部由 Python 镜像产出；两边一漂移，
+# 所有测量就都不可信了。本机是 Windows 没 Xcode，所以只能借 macos-26 runner 编译校验。
+on:
+  push:
+    paths:
+      - 'Sources/Core.swift'
+      - 'Sources/InstructionPresets.swift'
+      - 'Sources/MT/Prompts.swift'
+      - 'tools/regress_prompts.py'
+      - 'tools/segments.py'
+      - 'tools/verify_prompts.py'
+      - 'tools/verify_prompt_swift/**'
+      - '.github/workflows/verify-prompts.yml'
+  workflow_dispatch:
+
+jobs:
+  verify:
+    runs-on: macos-26
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Generate cases + expected prompts (Python mirror)
+        run: |
+          set -euo pipefail
+          python3 tools/verify_prompts.py --cases /tmp/promptcheck/cases.json --expect /tmp/promptcheck/expected.json
+
+      - name: Compile Swift prompt checker
+        run: |
+          set -euo pipefail
+          xcrun swiftc -O -parse-as-library \
+            Sources/Core.swift \
+            Sources/InstructionPresets.swift \
+            Sources/MT/Prompts.swift \
+            tools/verify_prompt_swift/PromptVerify.swift \
+            -o /tmp/promptcheck/promptcheck
+
+      - name: Run Swift checker
+        run: /tmp/promptcheck/promptcheck /tmp/promptcheck/cases.json /tmp/promptcheck/actual.json
+
+      - name: Compare Swift vs Python (byte exact)
+        run: |
+          set -euo pipefail
+          python3 tools/verify_prompts.py --expected /tmp/promptcheck/expected.json --actual /tmp/promptcheck/actual.json

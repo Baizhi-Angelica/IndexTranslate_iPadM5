@@ -7,7 +7,7 @@ import Foundation
 
 // MARK: - 输入与输出语言
 
-/// 输入模式：自动（zh-CN + en-US 两路，按转写文字判定），或手动指定 7 种输入语言之一
+/// 输入模式：自动（zh-CN + en-US 两路，按转写文字判定），或手动指定 8 种输入语言之一
 enum InputMode: String, CaseIterable, Identifiable {
     case chinese
     case english
@@ -16,6 +16,7 @@ enum InputMode: String, CaseIterable, Identifiable {
     case french
     case german
     case spanish
+    case italian
     case auto
 
     var id: String { rawValue }
@@ -29,6 +30,7 @@ enum InputMode: String, CaseIterable, Identifiable {
         case .french:   return "Français"
         case .german:   return "Deutsch"
         case .spanish:  return "Español"
+        case .italian:  return "Italiano"
         case .auto:     return "自动（中/Eng）"
         }
     }
@@ -43,6 +45,7 @@ enum InputMode: String, CaseIterable, Identifiable {
         case .french:   return .french
         case .german:   return .german
         case .spanish:  return .spanish
+        case .italian:  return .italian
         case .auto:     return nil
         }
     }
@@ -57,7 +60,9 @@ enum InputMode: String, CaseIterable, Identifiable {
     }
 }
 
-/// 输入语言（转写文本的语种）。7 种都与输出语言一一对应。
+/// 输入语言（转写文本的语种）。8 种都与输出语言一一对应。
+/// 注意：俄语目前只有输出（`OutputLanguage.russian`），没有输入——
+/// iPadOS 26 的 `SpeechTranscriber.supportedLocales` 里没有 ru-RU，Apple 还没提供俄语识别模型。
 enum SpeechLanguage: String, CaseIterable, Identifiable {
     case chinese
     case english
@@ -66,6 +71,7 @@ enum SpeechLanguage: String, CaseIterable, Identifiable {
     case french
     case german
     case spanish
+    case italian
 
     var id: String { rawValue }
 
@@ -79,6 +85,7 @@ enum SpeechLanguage: String, CaseIterable, Identifiable {
         case .french:   return "fr-FR"
         case .german:   return "de-DE"
         case .spanish:  return "es-ES"
+        case .italian:  return "it-IT"
         }
     }
 
@@ -92,6 +99,7 @@ enum SpeechLanguage: String, CaseIterable, Identifiable {
         case .french:   return "Français"
         case .german:   return "Deutsch"
         case .spanish:  return "Español"
+        case .italian:  return "Italiano"
         }
     }
 
@@ -105,6 +113,7 @@ enum SpeechLanguage: String, CaseIterable, Identifiable {
         case .french:   return "法语"
         case .german:   return "德语"
         case .spanish:  return "西班牙语"
+        case .italian:  return "意大利语"
         }
     }
 
@@ -118,6 +127,7 @@ enum SpeechLanguage: String, CaseIterable, Identifiable {
         case .french:   return .french
         case .german:   return .german
         case .spanish:  return .spanish
+        case .italian:  return .italian
         }
     }
 
@@ -134,6 +144,7 @@ enum SpeechLanguage: String, CaseIterable, Identifiable {
         if lower.hasPrefix("fr") { return .french }
         if lower.hasPrefix("de") { return .german }
         if lower.hasPrefix("es") { return .spanish }
+        if lower.hasPrefix("it") { return .italian }
         return .english
     }
 
@@ -156,7 +167,7 @@ enum SpeechLanguage: String, CaseIterable, Identifiable {
     }
 }
 
-/// 输出语言
+/// 输出语言（比输入语言多俄语：俄语只作为译文目标，因为系统识别器还不支持 ru-RU）
 enum OutputLanguage: String, CaseIterable, Identifiable {
     case chinese
     case english
@@ -165,6 +176,8 @@ enum OutputLanguage: String, CaseIterable, Identifiable {
     case french
     case german
     case spanish
+    case italian
+    case russian
 
     var id: String { rawValue }
 
@@ -177,6 +190,8 @@ enum OutputLanguage: String, CaseIterable, Identifiable {
         case .french:   return "Français"
         case .german:   return "Deutsch"
         case .spanish:  return "Español"
+        case .italian:  return "Italiano"
+        case .russian:  return "Русский"
         }
     }
 
@@ -190,10 +205,12 @@ enum OutputLanguage: String, CaseIterable, Identifiable {
         case .french:   return "法语"
         case .german:   return "德语"
         case .spanish:  return "西班牙语"
+        case .italian:  return "意大利语"
+        case .russian:  return "俄语"
         }
     }
 
-    /// 该输出语言对应的输入语种（用于"源=目标"时自动纠正）
+    /// 该输出语言对应的输入语种（用于"源=目标"时自动纠正）；俄语没有对应输入，返回 nil。
     var speechLanguage: SpeechLanguage? {
         switch self {
         case .chinese:  return .chinese
@@ -203,6 +220,8 @@ enum OutputLanguage: String, CaseIterable, Identifiable {
         case .french:   return .french
         case .german:   return .german
         case .spanish:  return .spanish
+        case .italian:  return .italian
+        case .russian:  return nil
         }
     }
 }

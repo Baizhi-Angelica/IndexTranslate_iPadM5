@@ -2,9 +2,10 @@
 # -*- coding: utf-8 -*-
 """翻译 prompt 回归测试脚本。
 
-对 tools/segments.py 里的每条语料 × 每个合法目标语言，按项目官方 prompt 格式拼出
-chatml prompt，直接打本机 llama.cpp 的 /completion（不套 chat template，正好验证
-“我们自己拼的 prompt”），记录延迟/token 统计、清洗输出，并自动判定：
+对 tools/segments.py 里的每条语料 × 每个合法目标语言，按当前 App 的
+PromptBuilder（Sources/MT/Prompts.swift）逐字节拼出 chatml prompt，直接打本机
+llama.cpp 的 /completion（不套 chat template，正好验证“我们自己拼的 prompt”），
+记录延迟/token 统计、清洗输出，并自动判定：
 
 - english_kept：中文源 + 非英语目标时，english_terms 是否原样（不区分大小写）保留；
 - empty：清洗后输出为空；
@@ -14,11 +15,15 @@ chatml prompt，直接打本机 llama.cpp 的 /completion（不套 chat template
 
 用法::
 
-    python tools/regress_prompts.py                    # 全量 120 次调用
-    python tools/regress_prompts.py --only zh          # 只跑中文源（72 次）
+    python tools/regress_prompts.py                    # 全量 160 次调用
+    python tools/regress_prompts.py --only zh          # 只跑中文源（96 次）
     python tools/regress_prompts.py --only en --limit 12
+    python tools/regress_prompts.py --targets it,ru    # 只测新增的输出语言
+    python tools/regress_prompts.py --preset formalMeeting   # 带「严肃会议」翻译需求
+    python tools/regress_prompts.py --instruction "回答尽量简短"
     python tools/regress_prompts.py --base-url http://127.0.0.1:8089
 
+`--preset` / `--instruction` 模拟 App 里「翻译需求」菜单；不传时是 App 的默认路径。
 只用 Python 标准库（urllib），不要 pip install。本脚本不会重启/占用服务端，只发请求。
 """
 from __future__ import annotations
@@ -27,6 +32,7 @@ import argparse
 import json
 import os
 import platform
+import re
 import statistics
 import sys
 import time
@@ -54,6 +60,8 @@ TARGETS = [
     ("fr", "法语"),
     ("de", "德语"),
     ("es", "西班牙语"),
+    ("it", "意大利语"),
+    ("ru", "俄语"),
     ("zh", "中文"),
 ]
 TARGET_NAME = dict(TARGETS)
@@ -61,9 +69,21 @@ TARGET_ORDER = [key for key, _ in TARGETS]
 
 # 每条语料的合法目标语言：中文源不出中文，英文源不出英文
 TARGETS_BY_SOURCE = {
-    "chinese": ["en", "ja", "ko", "fr", "de", "es"],
-    "english": ["zh", "ja", "ko", "fr", "de", "es"],
+    "chinese": ["en", "ja", "ko", "fr", "de", "es", "it", "ru"],
+    "english": ["zh", "ja", "ko", "fr", "de", "es", "it", "ru"],
 }
+
+# 内置「翻译需求」场景（与 Sources/InstructionPresets.swift 逐字一致）
+INSTRUCTION_PRESETS = {
+    "formalMeeting": "请使用正式、准确、克制的语气，适合商务会议或正式场合，避免口语化表达。",
+    "friends": "请使用轻松自然、口语化的语气，像朋友之间聊天，句子简短亲切。",
+    "newFriends": "请使用礼貌、友善、适度正式的语气，适合初次见面交谈，保持得体和尊重。",
+    "travelHelp": "请使用礼貌、直接、简短的语气，清楚说明需要什么帮助，方便对方立刻理解。",
+    "smallTalk": "请使用中性、自然、友好但不过分熟络的语气，适合和陌生人闲聊。",
+}
+
+# 约束行前缀：已经带标签的行原样保留（对齐官方 build_prompt / PromptBuilder.constraintLines）
+CONSTRAINT_TAGS = ("【硬性要求】", "【注意】", "【软性要求】")
 
 LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1", "0.0.0.0"}
 
@@ -90,37 +110,101 @@ ensure_no_proxy_env()
 
 
 # ---------------------------------------------------------------------------
-# prompt 拼装
+# prompt 拼装（与 Sources/MT/Prompts.swift 的 PromptBuilder 保持一致）
 # ---------------------------------------------------------------------------
-def build_user_message(segment: dict, target_key: str) -> str:
-    """按官方 prompt 格式拼“用户消息”（两种模板）。"""
+_ENGLISH_TERM_RE = re.compile(
+    r"[A-Za-z][A-Za-z0-9'’\-.&]*(?:[ \t]+[A-Za-z][A-Za-z0-9'’\-.&]*)*")
+
+
+def extract_english_terms(text: str, limit: int = 12) -> list:
+    """与 PromptBuilder.englishTerms 相同：连续拉丁词（允许空格/连字符/撇号/点/&），
+    去尾部标点、去重保序（不区分大小写）、长度 ≥ 2、最多 limit 个。"""
+    ordered = []
+    seen = set()
+    for match in _ENGLISH_TERM_RE.finditer(text):
+        term = match.group(0)
+        while term and term[-1] in ".-'":
+            term = term[:-1]
+        term = term.strip()
+        if len(term) < 2:
+            continue
+        key = term.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        ordered.append(term)
+        if len(ordered) >= limit:
+            break
+    return ordered
+
+
+def constraint_lines(instruction: str) -> list:
+    """与 PromptBuilder.constraintLines 一致：按行拆、去空行、去行首序号、补【注意】。"""
+    if not instruction:
+        return []
+    lines = []
+    for raw in instruction.strip().splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        line = line.lstrip("0123456789. ").strip()
+        if not line:
+            continue
+        if line.startswith(CONSTRAINT_TAGS):
+            lines.append(line)
+        else:
+            lines.append("【注意】" + line)
+    return lines
+
+
+def build_user_message(segment: dict, target_key: str, instruction: str = "") -> str:
+    """按当前 App 的 PromptBuilder.userPrompt 拼「用户消息」。"""
     source = segment["source"]
     target_prompt_name = TARGET_NAME[target_key]
     text = segment["text"]
-
-    if source == "chinese" and target_key != "en":
-        # 约束翻译：仅当 source=中文 且 target≠英语
-        return (
-            "请将以下中文文本翻译成{target}，并且严格遵循所有约束要求。\n\n"
-            "【源文】\n{text}\n\n"
-            "【约束要求】\n"
-            "1. 【硬性要求】保留源文中的英文单词、专有名词、品牌名和缩写原样输出，"
-            "不要翻译、不要改写、不要音译。\n"
-            "2. 【注意】自然口语风格。\n\n"
-            "只输出译文，不要有任何额外说明。"
-        ).format(target=target_prompt_name, text=text)
-
     source_prompt_name = corpus.SOURCE_PROMPT_NAMES[source]
+    instruction_lines = constraint_lines(instruction)
+    uses_glossary = source == "chinese" and target_key != "en"
+
+    if not uses_glossary and not instruction_lines:
+        # 通用翻译：无任何约束需求时保持原样（不给 prompt 增重）
+        return (
+            "请将以下{src}文本翻译为{target}，直接输出翻译结果，不要进行任何解释。\n\n{text}"
+        ).format(src=source_prompt_name, target=target_prompt_name, text=text)
+
+    constraints = []
+    if uses_glossary:
+        terms = extract_english_terms(text)
+        if terms:
+            constraints.append(
+                "【硬性要求】专名/术语对照: " + "、".join(term + "→" + term for term in terms))
+        else:
+            constraints.append(
+                "【硬性要求】保留源文中的英文单词、专有名词、品牌名和缩写原样输出，"
+                "不要翻译、不要改写、不要音译。")
+
+    if instruction_lines:
+        constraints.extend(instruction_lines)
+    else:
+        constraints.append("【注意】自然口语风格。")
+
+    reqs = "\n".join("%d. %s" % (index + 1, constraint)
+                     for index, constraint in enumerate(constraints))
     return (
-        "请将以下{src}文本翻译为{target}，直接输出翻译结果，不要进行任何解释。\n\n{text}"
-    ).format(src=source_prompt_name, target=target_prompt_name, text=text)
+        "请将以下{src}文本翻译成{target}，并且严格遵循所有约束要求。\n\n"
+        "【源文】\n{text}\n\n"
+        "【约束要求】\n{reqs}\n\n"
+        "只输出译文，不要有任何额外说明。"
+    ).format(src=source_prompt_name, target=target_prompt_name, text=text, reqs=reqs)
 
 
-def build_prompt(segment: dict, target_key: str) -> str:
-    return CHATML_HEAD + build_user_message(segment, target_key) + CHATML_TAIL
+def build_prompt(segment: dict, target_key: str, instruction: str = "") -> str:
+    return CHATML_HEAD + build_user_message(segment, target_key, instruction) + CHATML_TAIL
 
 
-def prompt_type(segment: dict, target_key: str) -> str:
+def prompt_type(segment: dict, target_key: str, instruction: str = "") -> str:
+    if constraint_lines(instruction):
+        return "constrained"
     return "constrained" if segment["source"] == "chinese" and target_key != "en" else "plain"
 
 
@@ -308,8 +392,8 @@ def extract_timings(obj: dict) -> dict:
 # 单条测试
 # ---------------------------------------------------------------------------
 def run_one(opener, base_url: str, segment: dict, target_key: str,
-            n_predict: int, timeout: float) -> dict:
-    prompt = build_prompt(segment, target_key)
+            n_predict: int, timeout: float, instruction: str = "") -> dict:
+    prompt = build_prompt(segment, target_key, instruction)
     wall_ms, obj = post_completion(opener, base_url, prompt, n_predict, timeout)
     timings = extract_timings(obj)
     raw_output = obj.get("content")
@@ -335,8 +419,9 @@ def run_one(opener, base_url: str, segment: dict, target_key: str,
         "target_name": TARGET_NAME[target_key],
         "text": segment["text"],
         "english_terms": list(segment["english_terms"]),
-        "prompt_type": prompt_type(segment, target_key),
+        "prompt_type": prompt_type(segment, target_key, instruction),
         "prompt": prompt,
+        "instruction": instruction,
         "wall_ms": wall_ms,
         "prompt_n": timings["prompt_n"],
         "predicted_n": timings["predicted_n"],
@@ -495,7 +580,14 @@ def render_report(records, summary, meta) -> str:
     add("- 调用：%d 条（成功 %d / 失败 %d）" % (
         summary["calls_total"], summary["calls_ok"], summary["errors"]))
     add("- prompt 外壳：chatml，thinking 关闭：`<|im_start|>assistant\\n<think>\\n\\n</think>\\n\\n`")
-    add("- 模板：中文源→非英语目标用「约束翻译」；中文源→英语、英文源→任一目标用「普通翻译」")
+    if meta.get("instruction"):
+        preset = meta.get("preset")
+        prefix = "场景 `%s`：" % preset if preset else ""
+        add("- 翻译需求：%s`%s`" % (prefix, meta["instruction"]))
+    else:
+        add("- 翻译需求：无（App 默认路径）")
+    add("- 模板：中文源→非英语目标用「约束翻译」+ 身份术语表；有翻译需求时所有方向都走「约束翻译」；"
+        "其余用「普通翻译」")
     add("- 请求参数：n_predict=%d，temperature=0，stop=[\"<|im_end|>\"]" % meta["n_predict"])
     add("- 机器：Python %s / %s" % (platform.python_version(), platform.platform()))
     add("")
@@ -664,7 +756,12 @@ def render_report(records, summary, meta) -> str:
     add("")
     add("```powershell")
     add("cd C:\\Users\\Angelica\\Desktop\\works\\DeepSeek\\IndexTranslate_iPadM5")
-    add("python tools\\regress_prompts.py")
+    if meta.get("preset"):
+        add("python tools\\regress_prompts.py --preset %s" % meta["preset"])
+    elif meta.get("instruction"):
+        add('python tools\\regress_prompts.py --instruction "%s"' % meta["instruction"])
+    else:
+        add("python tools\\regress_prompts.py")
     add("```")
     add("")
     add("原始逐条数据（含拼好的完整 prompt、原始输出、timings）见 `tools/out/raw.json`。")
@@ -676,12 +773,14 @@ def render_report(records, summary, meta) -> str:
 # ---------------------------------------------------------------------------
 # 主流程
 # ---------------------------------------------------------------------------
-def build_call_list(only_source):
+def build_call_list(only_source, target_filter=None):
     calls = []
     for segment in corpus.SEGMENTS:
         if only_source and segment["source"] != only_source:
             continue
         for target_key in TARGETS_BY_SOURCE[segment["source"]]:
+            if target_filter and target_key not in target_filter:
+                continue
             calls.append((segment, target_key))
     return calls
 
@@ -690,7 +789,13 @@ def parse_args(argv=None):
     parser = argparse.ArgumentParser(
         description="翻译 prompt 回归测试：对每条语料 × 每个合法目标语言调用本机 llama.cpp /completion。")
     parser.add_argument("--only", choices=["zh", "en", "chinese", "english"], default=None,
-                        help="只跑某一源语言：zh=中文源（72 次），en=英文源（48 次）")
+                        help="只跑某一源语言：zh=中文源（96 次），en=英文源（64 次）")
+    parser.add_argument("--targets", default=None,
+                        help="只跑这些目标语言（逗号分隔，如 it,ru）；默认跑全部 8 个")
+    parser.add_argument("--instruction", default="",
+                        help="模拟 App 的「翻译需求」：自由文本会渲染成【注意】约束")
+    parser.add_argument("--preset", choices=sorted(INSTRUCTION_PRESETS.keys()), default=None,
+                        help="模拟 App 的内置场景（与 Sources/InstructionPresets.swift 一致）")
     parser.add_argument("--limit", type=int, default=None,
                         help="最多跑 N 次调用（过滤后从前往后截断），调试用")
     parser.add_argument("--base-url", default=DEFAULT_BASE_URL,
@@ -711,14 +816,28 @@ def main(argv=None) -> int:
     base_url = args.base_url.rstrip("/")
     out_dir = Path(args.out_dir)
 
-    calls = build_call_list(only_source)
+    if args.preset and args.instruction:
+        print("--preset 和 --instruction 只能二选一", file=sys.stderr)
+        return 2
+    instruction = INSTRUCTION_PRESETS[args.preset] if args.preset else args.instruction
+
+    target_filter = None
+    if args.targets:
+        target_filter = [item.strip().lower() for item in args.targets.split(",") if item.strip()]
+        unknown = [key for key in target_filter if key not in TARGET_NAME]
+        if unknown:
+            print("未知目标语言：%s（可选：%s）" % (",".join(unknown), ",".join(TARGET_ORDER)),
+                  file=sys.stderr)
+            return 2
+
+    calls = build_call_list(only_source, target_filter)
     if args.limit is not None:
         if args.limit <= 0:
             print("--limit 必须为正整数", file=sys.stderr)
             return 2
         calls = calls[: args.limit]
     if not calls:
-        print("没有可跑的调用（检查 --only / --limit）", file=sys.stderr)
+        print("没有可跑的调用（检查 --only / --targets / --limit）", file=sys.stderr)
         return 2
 
     opener = make_opener(base_url)
@@ -742,6 +861,11 @@ def main(argv=None) -> int:
     else:
         print("  /props   : 不可用（%s）" % props_error)
     print("  调用数   : %d（n_predict=%d, temperature=0）" % (len(calls), args.n_predict))
+    if instruction:
+        print("  翻译需求 : %s%s" % (
+            ("场景 " + args.preset + " → ") if args.preset else "", instruction))
+    else:
+        print("  翻译需求 : 无（App 默认路径）")
     print("  输出     : %s" % out_dir)
     print("=" * 78)
     sys.stdout.flush()
@@ -757,7 +881,7 @@ def main(argv=None) -> int:
     for index, (segment, target_key) in enumerate(calls, 1):
         try:
             record = run_one(opener, base_url, segment, target_key,
-                             args.n_predict, args.timeout)
+                             args.n_predict, args.timeout, instruction)
         except ServerError as exc:
             error_count += 1
             print("[%03d/%03d] ERROR %s -> %s: %s" % (
@@ -771,7 +895,7 @@ def main(argv=None) -> int:
                 "target_name": TARGET_NAME[target_key],
                 "text": segment["text"],
                 "english_terms": list(segment["english_terms"]),
-                "prompt_type": prompt_type(segment, target_key),
+                "prompt_type": prompt_type(segment, target_key, instruction),
                 "error": str(exc),
             })
             if index == 1:
@@ -788,7 +912,7 @@ def main(argv=None) -> int:
                 "source_name": corpus.SOURCE_PROMPT_NAMES[segment["source"]],
                 "target": target_key, "target_name": TARGET_NAME[target_key],
                 "text": segment["text"], "english_terms": list(segment["english_terms"]),
-                "prompt_type": prompt_type(segment, target_key),
+                "prompt_type": prompt_type(segment, target_key, instruction),
                 "error": "%r" % exc,
             })
             continue
@@ -826,6 +950,9 @@ def main(argv=None) -> int:
         "python": platform.python_version(),
         "platform": platform.platform(),
         "only": only_source,
+        "targets": target_filter,
+        "instruction": instruction,
+        "preset": args.preset,
         "limit": args.limit,
         "elapsed_s": round(elapsed, 1),
         "props_error": props_error,
