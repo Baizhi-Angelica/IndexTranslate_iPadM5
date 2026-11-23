@@ -6,7 +6,7 @@
 
 ## 这是什么
 
-在 **iPad Pro M5（iPadOS 26）** 上跑**全离线**语音翻译：麦克风 → Apple `SpeechAnalyzer`（设备端流式转写）→ `Index-Translate-2B` 移动端 GGUF（Q4_K_M，1.22 GB）→ 译文。输入 7 种语言之一或「自动」（自动只跑 zh-CN + en-US 两路），输出 7 种语言，**中英混说时英文词原样保留**。
+在 **iPad Pro M5（iPadOS 26）** 上跑**全离线**语音翻译：麦克风 → Apple `SpeechAnalyzer`（设备端流式转写）→ `Index-Translate-2B` 移动端 GGUF（Q4_K_M，1.22 GB）→ 译文。输入 8 种语言之一或「自动」（自动只跑 zh-CN + en-US 两路），输出 9 种语言（俄语目前只做输出，系统识别器没有 ru-RU），**中英混说时英文词原样保留**。ⓘ 里还可以选「翻译需求」（说话场景 / 自定义要求），按官方 instTrans 格式加一条【注意】约束。
 
 本机是 **Windows，没有 Xcode**：iOS 侧改动**无法本地编译**，一律靠 GitHub Actions 的 `macos-26` runner，产物是**未签名 ipa**，再由 Windows 上的 Sideloadly + 免费 Apple ID 重签安装（7 天有效期）。
 
@@ -29,6 +29,9 @@
 | `Frameworks/`、`Sources/MT/include/`、`build/`、`tools/out/` 不提交 | 前两个由 CI 下载，后两个是产物 |
 | 不要提交 Apple ID、密码、`*.ipa`、token | —— |
 | 改 prompt 必须跑 `python tools\ab_english.py`（或 `regress_prompts.py`）并记录数字 | 否则"英文保留"会悄悄退化，这是本项目最容易回退的指标 |
+| 翻译需求（instruction）必须按官方 instTrans 格式渲染：约束段里每条自由文本加 `【注意】`，中文源→非英语时身份术语表仍是第一条 `【硬性要求】`；`instruction` 为空时 prompt 必须与 v1.1.0 逐字节一致 | 格式对齐官方 `inference/llm/call_api.py::build_prompt`；空需求不能让默认路径悄悄变化（回归基线要可比） |
+| 改 `PromptBuilder` / `Core.swift` 语言枚举后，`verify-prompts.yml` 必须绿 | 它把 Swift 实际 prompt 与 `tools/` 里的 Python 镜像逐字节比对（396 条 case）；两边漂移会让所有回归数字失效 |
+| 新增**输入**语言必须先在真机 `SpeechTranscriber.supportedLocales` 里确认；俄语目前只做输出 | ru-RU 不在 iPadOS 26 的 31 个识别语言里（it-IT 在）；乱加输入语言只会在点麦克风时报错 |
 | 不要照搬小米版"Q4 已否决"的结论 | 那条针对的是 Index-Echo 语音模型；Index-Translate 官方把 Q4_K_M 作为推荐默认档（COMET -0.15） |
 | Windows 沙箱里 push 用 token URL，推完还原 remote | `gh` 的 credential helper 在沙箱里会因 Cygwin 信号管道失败（`Win32 error 5`）；不要用 `~`（HOME） |
 
@@ -36,16 +39,19 @@
 
 ```
 Sources/Core.swift                  语言枚举 + ASREvent + 接口契约（改契约先改这里）
-Sources/AppModel.swift              状态机：权限 / 模型 / ASR 配对 / 队列（约 950 行，最复杂）
-Sources/ContentView.swift           SwiftUI 界面
+Sources/InstructionPresets.swift    「翻译需求」5 个内置场景 + UserDefaults 键
+Sources/AppModel.swift              状态机：权限 / 模型 / ASR 配对 / 队列 / 翻译需求（约 1050 行，最复杂）
+Sources/ContentView.swift           SwiftUI 界面（ⓘ 面板 + 翻译需求二级页面）
 Sources/ASR/SpeechAnalyzerASR.swift SpeechAnalyzer + SpeechTranscriber（iOS 26）
-Sources/MT/Prompts.swift            ChatML / 约束模板 / 术语表抽取 / 输出清洗
+Sources/MT/Prompts.swift            ChatML / 约束模板 / 术语表抽取 / 翻译需求渲染 / 输出清洗
 Sources/MT/LlamaTranslator.swift    Swift ↔ C 封装（锁、线程数、GPU 层数）
 Sources/MT/ITXLlama.c               llama.cpp C 桥 + 日志落盘
 Sources/ModelStore.swift            模型定位 / 导入 / 下载（ModelScope → hf-mirror → HF，自带分块下载器）
 project.yml                         XcodeGen 工程描述（新增源文件不用改，Sources 目录自动收编）
 .github/workflows/build-ipa.yml     构建 → 打 ipa → Verify → 发 prerelease
+.github/workflows/verify-prompts.yml Swift ↔ Python 的 prompt 逐字节比对（改 prompt 必看）
 tools/(segments|regress_prompts|ab_english).py   本地提示词回归 / A/B
+tools/verify_prompts.py             Swift/Python prompt 一致性校验的 Python 侧
 docs/PLAN.md, docs/PITFALLS.md      决策记录 / 踩坑
 docs/HANDOFF.md                     交接笔记（现状 / 已证伪 / 未验证 / 命令清单）
 ```
@@ -73,8 +79,14 @@ $root = 'C:\Users\Angelica\Desktop\works\DeepSeek\IndexTranslate_iPadM5'
 Set-Location $root
 python tools\segments.py                                # 语料自检
 python tools\regress_prompts.py --limit 12              # 冒烟
-python tools\regress_prompts.py                         # 全量 120 次，约 1.5–2 分钟
+python tools\regress_prompts.py                         # 全量 160 次（12 中文源×8 + 8 英文源×8），约 2 分钟
+python tools\regress_prompts.py --preset formalMeeting  # 带「严肃会议」翻译需求再跑一遍
+python tools\regress_prompts.py --targets it,ru         # 只测新增输出语言
 python tools\ab_english.py --strategies s1,s2 --targets ja --limit 8
+
+# prompt 字节级一致性（本地只生成 Python 侧；真正的 Swift 编译在 CI 的 verify-prompts.yml）
+python tools\verify_prompts.py --cases .dsh-tmp\cases.json --expect .dsh-tmp\expected.json
+& $gh run list --repo $repo --workflow verify-prompts.yml --limit 2
 ```
 
 ## 验收
@@ -95,12 +107,17 @@ python tools\ab_english.py --strategies s1,s2 --targets ja --limit 8
 3. 中文 → 日语：输出日语，但 `dining hall` / `library` 仍为英文
 4. 连说三句：只显示最近一句的译文（丢旧保新），不卡界面
 5. 单句端到端（说完到出译文）建议 < 2 s；`Documents/llama.log` 里无 Metal 初始化错误
+6. 新语言：输入 Italiano 说一句意大利语应出中文；输出 Русский 时中文应出俄语
+7. 翻译需求：ⓘ →「翻译需求」选「严肃会议」，说同一句中文，语气应比默认更正式；
+   退出 App 重开应回到「默认（不额外要求）」；勾选☑️保存后重开应仍是「严肃会议」
 
 ## 不要做
 
-- 不要在没有 macOS 的情况下尝试本地 `xcodebuild` / `swiftc`（本机没有工具链，浪费时间）
+- 不要在没有 macOS 的情况下尝试本地 `xcodebuild` / `swiftc`（本机没有工具链，浪费时间）；
+  prompt 一致性校验交给 `verify-prompts.yml`，不要手写"应该一样"
 - 不要把 `Frameworks/`、`Sources/MT/include/`、`tools/out/`、`build/` 提交进仓库
 - 不要在 CI 里配置签名证书、修改 `CODE_SIGNING_ALLOWED`
 - 不要为了一次实验改动 `PromptBuilder.chat(_:)` 的外壳（改了就没法跟前后的回归数据对比）
 - 不要把模型文件、ipa、Apple ID 凭据写进仓库或日志
 - 不要删除 `probe-speech.yml`：装机前它是唯一能确认 zh-CN 支持的途径
+- 不要给俄语加**输入**语言（SpeechTranscriber 没有 ru-RU；要做得另起 `DictationTranscriber` 兜底，先证实再动手）

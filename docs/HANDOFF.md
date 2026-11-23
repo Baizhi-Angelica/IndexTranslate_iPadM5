@@ -1,6 +1,6 @@
 # 交接笔记：写给下一个接手这个项目的人（或模型）
 
-> 最后更新：2026-11-16 晚，对应 `index-translate v1.1.0`。
+> 最后更新：2026-11-23，对应 `index-translate v1.2.0-beta.1`（稳定版仍是 v1.1.0）。
 > 先读这份，再读 `AGENTS.md`（硬约束）、`PLAN.md`（决策）、`PITFALLS.md`（踩坑）。
 > 这份的语气会比较直白：它记的是"当时为什么这么做"，以及"哪些地方我其实没把握"。
 
@@ -8,10 +8,10 @@
 
 ## 1. 一句话现状
 
-**iPad Pro M5 上已经有一个能用的、全离线的语音翻译 App**：说 7 种语言之一（中/英/日/韩/法/德/西）→ 系统 `SpeechAnalyzer` 转写 → `Index-Translate-2B`（GGUF, llama.cpp + Metal）翻译 → 7 种语言输出，中英混说时英文词原样保留。代码在 GitHub，ipa 在 Releases，装机靠 Windows + Sideloadly + 免费 Apple ID。
+**iPad Pro M5 上已经有一个能用的、全离线的语音翻译 App**：说 8 种语言之一（中/英/日/韩/法/德/西/意）→ 系统 `SpeechAnalyzer` 转写 → `Index-Translate-2B`（GGUF, llama.cpp + Metal）翻译 → 9 种语言输出（多一个俄语，仅输出），中英混说时英文词原样保留。ⓘ 里还能选「翻译需求」（说话场景 / 自定义要求）。代码在 GitHub，ipa 在 Releases，装机靠 Windows + Sideloadly + 免费 Apple ID。
 
 - 仓库：<https://github.com/Baizhi-Angelica/IndexTranslate_iPadM5>
-- 最新版：`v1.1.0`（7 种输入语言 + 配对窗口 0.7 s；另有 `build-*` 与 `v1.1.0-beta.*` 记录测试过程）
+- 最新版：`v1.2.0-beta.1`（翻译需求 + 意大利语输入输出 + 俄语输出；预发布，<https://github.com/Baizhi-Angelica/IndexTranslate_iPadM5/releases/tag/v1.2.0-beta.1>）；稳定版 `v1.1.0`（7 种输入语言 + 配对窗口 0.7 s）
 - 演示视频：<https://www.bilibili.com/video/BV151sH6EE81>
 - 前一代（先导实验，Android）：<https://github.com/Baizhi-Angelica/IndexTranslate_OnXiaomi>
 
@@ -88,6 +88,9 @@ Windows（本机）                          GitHub Actions（macos-26 / Xcode 2
 6. **Metal 首次编译 173 s**：只在真机日志里观测到，没有做前置预热或进度提示；第二次启动 0.3 s（管线缓存命中），但缓存会不会被系统清掉没测。
 7. **免费签名 7 天**：Sideloadly 的 auto-refresh 需要电脑开机 + 同 Wi-Fi；这条是用户侧的，代码无关。
 8. **长会话上下文**：每句都 `llama_memory_clear`，句与句之间无上下文，模型不会"串味"，但也翻不了指代依赖前文的长对话。
+9. **意大利语输入**（v1.2.0 新增）：`it-IT` 在真机 `supportedLocales` 的 31 个语言里（2026-11-15 实测），代码路径与日/法/德/西完全一致，但**没有真机说过意大利语**。
+10. **俄语输出**（v1.2.0 新增）：只依赖翻译模型，Windows CPU 回归里 12 条中文语料 → 俄语 11/12 全中（丢的 1 条是 `clone` 被译成 `клонировал`）；真机质量和排版没验过。
+11. **「翻译需求」的语气效果**：Windows CPU 上 5 个场景各跑了 96 次中文源回归（见 §11），但「听起来是不是真的更正式/更亲切」必须真机人耳判断；模型只是软约束，不保证 100% 遵守。
 
 ---
 
@@ -151,6 +154,7 @@ python make_tts.py; python make_slides.py --force; python make_video.py
 ## 9. 交接检查清单
 
 - [ ] `gh run list` 最新一次是 success；`gh release list` 最新是正式版
+- [ ] 改了 `PromptBuilder` / 语言枚举 → `verify-prompts.yml` 绿（396 条 case 逐字节一致）
 - [ ] 下载 ipa 后核对：`Info.plist` 里 `CFBundleShortVersionString` 与 release tag 一致
 - [ ] ipa 里 `Payload/ITXTranslate.app/Frameworks/llama.framework/llama` 存在（否则装上必崩）
 - [ ] 手机上如有 crispasr 残留进程/临时目录，已清理
@@ -192,3 +196,81 @@ python make_tts.py; python make_slides.py --force; python make_video.py
 改任何东西之前，先跑一遍 `tools/regress_prompts.py` 存个基线，然后才动手。
 这个仓库里"看起来没问题但真机不工作"的坑已经踩过四次（动态库、embed、下载进度、PowerShell 编码），
 **永远先取证，再下结论**。
+
+---
+
+## 11. 2026-11-23：v1.2.0-beta.1（翻译需求 + 意大利语 / 俄语输出）
+
+对应 issue #4。这一轮只动了 UI + prompt 拼装 + 语言枚举，**没动**推理/ASR/下载链路。
+
+### 做了什么
+
+1. **「翻译需求」**（ⓘ → 翻译需求）：
+   - 一级菜单只显示当前已选/已输入的内容（默认 / 场景名 / `自定义：…`），点进二级页面。
+   - 二级页面：5 个中文场景（严肃会议 / 朋友小聚 / 初见新朋友 / 旅行中求助 / 陌生人随便聊聊）
+     + 自定义文本框（多行）+ 「实际加进 prompt 的约束」预览。
+     场景与自定义**二选一**：点场景覆盖文本，改文本就变成自定义（和用户确认过）。
+   - 底部 ☑️ + 蓝色文字「保存这次的需求，下次默认使用」：勾选才写 `UserDefaults`
+     （`itx.instruction.save` / `itx.instruction.text`）；不勾选 = 退出即清空（issue #4 的要求）。
+   - prompt 侧：对齐官方 `inference/llm/call_api.py::build_prompt`——自由文本按行渲染成
+     `【注意】…`（行首序号会去掉；已带【硬性要求】/【注意】/【软性要求】的行原样保留），
+     中文源→非英语时身份术语表仍是第一条【硬性要求】。`instruction` 为空时 prompt 与 v1.1.0 逐字节一致。
+2. **语言**：输入 + `Italiano`（`it-IT`），输出 + `Italiano` / `Русский`。
+   俄语**只做输出**：真机 `supportedLocales` 31 个语言区里没有 `ru-RU`（有 `it-IT`），
+   用户也确认这版先不做俄语输入（未来要走 `DictationTranscriber`，见 PLAN §2）。
+3. **工具**：
+   - `regress_prompts.py` 的 prompt 拼装补齐成当前 App 的**术语表**版本（此前脚本还停在软约束版本，
+     历史报告的 28.3% 是软约束数字，不是 App 行为），新增 `--preset` / `--instruction` / `--targets`。
+   - 新增 `tools/verify_prompts.py` + `tools/verify_prompt_swift/PromptVerify.swift` +
+     `.github/workflows/verify-prompts.yml`：在 macos-26 上把 `Core.swift` + `InstructionPresets.swift` +
+     `Prompts.swift` 编成小可执行文件，跑 396 条 case，和 Python 镜像**逐字节**比对。
+     以后 Swift 或 Python 任意一边漂移，CI 会红——这是本轮最值钱的基础设施。
+
+### 回归数字（Windows CPU，Q4_K_M，`tools/regress_prompts.py`）
+
+| 场景 | 调用 | english_kept | term 保留 | 空输出 | 平均延迟 |
+|---|---:|---:|---:|---:|---:|
+| 默认（无翻译需求） | 160（中文 96 / 英文 64） | **83/84 (98.8%)** | 230/231 | 0 | 683 ms（中文源 786 ms） |
+| 严肃会议（中文源） | 96 | 82/84 (97.6%) | 229/231 | 0 | 912 ms |
+| 朋友小聚（中文源） | 96 | 82/84 (97.6%) | 229/231 | 0 | 899 ms |
+| 初见新朋友（中文源） | 96 | 82/84 (97.6%) | 229/231 | 0 | 922 ms |
+| 旅行中求助（中文源） | 96 | 83/84 (98.8%) | 230/231 | 0 | 902 ms |
+| 陌生人随便聊聊（中文源） | 96 | 82/84 (97.6%) | 229/231 | 0 | 903 ms |
+
+按目标语言（默认路径）：意大利语 12/12（33/33 term）、俄语 11/12（32/33，唯一 MISS 是
+`zh-12` 的 `clone` 被译成 `клонировал`），日韩法德西全部 12/12；日语目标的 5 条"严格汉字泄漏"
+都是正常的日语汉字（有假名），真实中文泄漏 0。
+
+5 个场景各自的 MISS（除共同的 `zh-12→ru / clone` 外）：
+严肃会议多丢 `zh-12→it / clone`；朋友小聚多丢 `zh-02→ru / debug`；初见新朋友多丢 `zh-11→fr / HR`；
+陌生人随便聊聊多丢 `zh-07→ko / meeting`。都是 84 条里的 1–2 条，和场景没有系统性关系（默认路径也有 1 条）。
+
+**成本**：翻译需求让中文源的 prompt 从平均 91 token 涨到 110–113 token（+约 20 token），
+Windows CPU 上平均延迟 +约 110 ms；真机 prefill 44,000 tok/s，折算不到 1 ms，可忽略。
+
+**语气对照**（同一句中文 `zh-07` → 日语，肉眼可见场景生效）：
+
+| 场景 | 译文 |
+|---|---|
+| 默认 | 午後の3時のmeetingはZoomに切り替わったので、calendarを更新するのを忘れずに。 |
+| 严肃会议 | 午後の3時のmeetingはZoomに変更になりました。calendarを更新するのを忘れないようにしてください。 |
+| 朋友小聚 | 午後の3時のmeetingがZoomに変わったから、calendarを更新するのを忘れずに。 |
+| 陌生人随便聊聊 | 午後の3時のmeetingはZoomに切り替わりました。calendarを更新するのを忘れないように。 |
+
+> 注意：这轮的中文源→非英语 english_kept 是 **98.8%**，因为脚本终于和 App 一样用了术语表。
+> 历史上 `tools/out/report.md` 里的 28.3% 是旧脚本的"软约束"模板，别拿两个数字直接比。
+
+### 没验证的地方
+
+- 意大利语输入没在真机上说过；俄语输出没在真机上看过质量/排版；「翻译需求」的语气效果只能人耳判断。
+- `verify-prompts.yml` 首次跑通要确认 macOS 侧 swiftc 编译没问题（本地 Windows 无法预演）。
+- 场景文案是这一轮临时拟的（5 句中文），用户如果觉得语气不对，改
+  `Sources/InstructionPresets.swift` + `tools/regress_prompts.py::INSTRUCTION_PRESETS`（两处逐字一致），
+  再跑回归 + verify-prompts 即可，不用动 UI 结构。
+
+### 下次可以直接接着做
+
+1. 俄语输入：`DictationTranscriber` 兜底（Apple 听写引擎，社区项目验证过 ru-RU）。
+   需要把 `SpeechAnalyzerASR` 的 transcriber 泛化成 Speech/Dictation 两种（都 conform `SpeechModule`）。
+2. SHA-256 校验 / 断点续传（v1.1.0 遗留）。
+3. 术语表可编辑（和「翻译需求」共用 UI 形态）。
