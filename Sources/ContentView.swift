@@ -543,9 +543,14 @@ private struct InfoSheet: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     HStack(alignment: .center) {
-                        Text("关于")
-                            .font(.system(size: 24, weight: .bold))
-                            .foregroundStyle(Color.primary)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("关于")
+                                .font(.system(size: 24, weight: .bold))
+                                .foregroundStyle(Color.primary)
+                            Text("index-translate " + appVersionText)
+                                .font(.system(size: 12))
+                                .foregroundStyle(Color.secondary)
+                        }
                         Spacer(minLength: 8)
                         Button("完成") {
                             dismiss()
@@ -795,6 +800,10 @@ private struct InfoSheet: View {
                     Text("关于这个项目")
                         .font(.system(size: 17, weight: .semibold))
                         .foregroundStyle(Color.primary)
+                    Text("v1.2.0 新增：ⓘ →「翻译需求」（场景 / 自定义要求，可勾选记住到下次启动）、意大利语输入输出、俄语输出。")
+                        .font(.system(size: 13))
+                        .foregroundStyle(Color.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                     if let repoURL: URL = URL(string: "https://github.com/Baizhi-Angelica/IndexTranslate_iPadM5") {
                         Link(destination: repoURL) {
                             Label("GitHub · Baizhi-Angelica/IndexTranslate_iPadM5",
@@ -871,6 +880,14 @@ private struct InfoSheet: View {
                 .font(.system(size: 12))
                 .foregroundStyle(Color.secondary)
         }
+    }
+
+    /// 读 Info.plist 里的版本号（CFBundleShortVersionString / CFBundleVersion）
+    private var appVersionText: String {
+        let info: [String: Any] = Bundle.main.infoDictionary ?? [:]
+        let shortVersion: String = info["CFBundleShortVersionString"] as? String ?? "?"
+        let build: String = info["CFBundleVersion"] as? String ?? "?"
+        return "v" + shortVersion + "（build " + build + "）"
     }
 
     private var supportedLocalesPreview: String {

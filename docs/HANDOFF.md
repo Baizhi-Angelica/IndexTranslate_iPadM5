@@ -1,6 +1,6 @@
 # 交接笔记：写给下一个接手这个项目的人（或模型）
 
-> 最后更新：2026-11-23，对应 `index-translate v1.2.0-beta.1`（稳定版仍是 v1.1.0）。
+> 最后更新：2026-11-23，对应 `index-translate v1.2.0`（正式版，用户真机测试 OK）。
 > 先读这份，再读 `AGENTS.md`（硬约束）、`PLAN.md`（决策）、`PITFALLS.md`（踩坑）。
 > 这份的语气会比较直白：它记的是"当时为什么这么做"，以及"哪些地方我其实没把握"。
 
@@ -11,7 +11,8 @@
 **iPad Pro M5 上已经有一个能用的、全离线的语音翻译 App**：说 8 种语言之一（中/英/日/韩/法/德/西/意）→ 系统 `SpeechAnalyzer` 转写 → `Index-Translate-2B`（GGUF, llama.cpp + Metal）翻译 → 9 种语言输出（多一个俄语，仅输出），中英混说时英文词原样保留。ⓘ 里还能选「翻译需求」（说话场景 / 自定义要求）。代码在 GitHub，ipa 在 Releases，装机靠 Windows + Sideloadly + 免费 Apple ID。
 
 - 仓库：<https://github.com/Baizhi-Angelica/IndexTranslate_iPadM5>
-- 最新版：`v1.2.0-beta.1`（翻译需求 + 意大利语输入输出 + 俄语输出；预发布，<https://github.com/Baizhi-Angelica/IndexTranslate_iPadM5/releases/tag/v1.2.0-beta.1>）；稳定版 `v1.1.0`（7 种输入语言 + 配对窗口 0.7 s）
+- 最新版：`v1.2.0`（翻译需求 + 意大利语输入输出 + 俄语输出；<https://github.com/Baizhi-Angelica/IndexTranslate_iPadM5/releases/tag/v1.2.0>）。上一版 `v1.1.0`（7 种输入语言 + 配对窗口 0.7 s）作为历史版本保留
+- 测试过程：`v1.2.0-beta.1`（2026-11-23，用户真机测试 OK）→ 正式版 `v1.2.0`（只多了 ⓘ 面板里的版本号显示与 About 更新说明）
 - 演示视频：<https://www.bilibili.com/video/BV151sH6EE81>
 - 前一代（先导实验，Android）：<https://github.com/Baizhi-Angelica/IndexTranslate_OnXiaomi>
 
@@ -88,9 +89,10 @@ Windows（本机）                          GitHub Actions（macos-26 / Xcode 2
 6. **Metal 首次编译 173 s**：只在真机日志里观测到，没有做前置预热或进度提示；第二次启动 0.3 s（管线缓存命中），但缓存会不会被系统清掉没测。
 7. **免费签名 7 天**：Sideloadly 的 auto-refresh 需要电脑开机 + 同 Wi-Fi；这条是用户侧的，代码无关。
 8. **长会话上下文**：每句都 `llama_memory_clear`，句与句之间无上下文，模型不会"串味"，但也翻不了指代依赖前文的长对话。
-9. **意大利语输入**（v1.2.0 新增）：`it-IT` 在真机 `supportedLocales` 的 31 个语言里（2026-11-15 实测），代码路径与日/法/德/西完全一致，但**没有真机说过意大利语**。
-10. **俄语输出**（v1.2.0 新增）：只依赖翻译模型，Windows CPU 回归里 12 条中文语料 → 俄语 11/12 全中（丢的 1 条是 `clone` 被译成 `клонировал`）；真机质量和排版没验过。
-11. **「翻译需求」的语气效果**：Windows CPU 上 5 个场景各跑了 96 次中文源回归（见 §11），但「听起来是不是真的更正式/更亲切」必须真机人耳判断；模型只是软约束，不保证 100% 遵守。
+9. **意大利语输入**（v1.2.0 新增）：`it-IT` 在真机 `supportedLocales` 的 31 个语言里（2026-11-15 实测），代码路径与日/法/德/西完全一致。用户在 `v1.2.0-beta.1` 上真机测试 OK（2026-11-23），但**逐项数字/样本没有回传**，只确认了「能用、正常」。
+10. **俄语输出**（v1.2.0 新增）：只依赖翻译模型，Windows CPU 回归里 12 条中文语料 → 俄语 11/12 全中（丢的 1 条是 `clone` 被译成 `клонировал`）。用户 beta 版真机测试 OK，具体译文质量/排版没有记录。
+11. **「翻译需求」的语气效果**：Windows CPU 上 5 个场景各跑了 96 次中文源回归（见 §11），用户 beta 版真机测过并确认可接受；模型只是软约束，不保证 100% 遵守，极端句子仍可能跑偏。
+12. **「翻译需求」的持久化**：勾选保存走 `UserDefaults`；用户 beta 版整体确认可用，但「退出清空 / 勾选保存」逐条表现、以及**覆盖安装（Sideloadly 重签）后是否保留**都没有单独取证（UserDefaults 在 App 容器里，理论上保留）。
 
 ---
 
@@ -199,9 +201,14 @@ python make_tts.py; python make_slides.py --force; python make_video.py
 
 ---
 
-## 11. 2026-11-23：v1.2.0-beta.1（翻译需求 + 意大利语 / 俄语输出）
+## 11. 2026-11-23：v1.2.0（翻译需求 + 意大利语 / 俄语输出）
 
 对应 issue #4。这一轮只动了 UI + prompt 拼装 + 语言枚举，**没动**推理/ASR/下载链路。
+
+- `v1.2.0-beta.1`：功能完整版，用户真机测试 OK（2026-11-23）。
+- `v1.2.0`：正式版，和 beta 的唯一差别是 ⓘ 面板里显示了版本号 +「关于这个项目」多一行 v1.2.0 更新说明。
+- 正式版发布前跑过：`build-*` CI（BUILD OK / bundle check OK / ipa 7 MB+）、`verify prompt bytes`（396 条 case 一致）、
+  ipa 内 `CFBundleShortVersionString=1.2.0`、`CFBundleVersion=4`、`Frameworks/llama.framework/llama` 存在。
 
 ### 做了什么
 
@@ -260,13 +267,19 @@ Windows CPU 上平均延迟 +约 110 ms；真机 prefill 44,000 tok/s，折算�
 > 注意：这轮的中文源→非英语 english_kept 是 **98.8%**，因为脚本终于和 App 一样用了术语表。
 > 历史上 `tools/out/report.md` 里的 28.3% 是旧脚本的"软约束"模板，别拿两个数字直接比。
 
+### 真机验收（2026-11-23）
+
+`v1.2.0-beta.1` 装到 iPad Pro M5 后，用户确认**整体测试 OK**，随后发正式版 `v1.2.0`。
+**注意**：用户只回了"测试 ok"这一句，**逐项数字/截图/译文样本都没有回传**；本节回归表里的数字都是 Windows CPU 的。
+
 ### 没验证的地方
 
-- 意大利语输入没在真机上说过；俄语输出没在真机上看过质量/排版；「翻译需求」的语气效果只能人耳判断。
-- `verify-prompts.yml` 首次跑通要确认 macOS 侧 swiftc 编译没问题（本地 Windows 无法预演）。
+- 意大利语输入、俄语输出、翻译需求语气都只在真机上"整体确认可用"，**没有记录具体延迟/译文质量**；
+  以后要写进 README 的性能数据，仍需一次带 `Documents/llama.log` 的实测。
 - 场景文案是这一轮临时拟的（5 句中文），用户如果觉得语气不对，改
   `Sources/InstructionPresets.swift` + `tools/regress_prompts.py::INSTRUCTION_PRESETS`（两处逐字一致），
   再跑回归 + verify-prompts 即可，不用动 UI 结构。
+- 覆盖安装（Sideloadly 重签）后翻译需求的 UserDefaults 是否保留，没有单独验过。
 
 ### 下次可以直接接着做
 
