@@ -643,7 +643,7 @@ final class AppModel: ObservableObject {
             finalizedTranscript = trimmed
         } else {
             var needsSpace: Bool = false
-            if source == .english {
+            if source != .chinese && source != .japanese {
                 needsSpace = true
             } else if let lastScalar = finalizedTranscript.unicodeScalars.last,
                       AppModel.isLatinLetter(lastScalar) {

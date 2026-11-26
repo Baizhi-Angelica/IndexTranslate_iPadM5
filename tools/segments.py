@@ -21,6 +21,7 @@ import sys
 SOURCE_PROMPT_NAMES = {
     "chinese": "中文",
     "english": "英文",
+    "arabic": "阿拉伯语",
 }
 
 SEGMENTS = [

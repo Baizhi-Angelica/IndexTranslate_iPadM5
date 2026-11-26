@@ -61,6 +61,7 @@ TARGETS = [
     ("de", "德语"),
     ("es", "西班牙语"),
     ("it", "意大利语"),
+    ("ar", "阿拉伯语"),
     ("ru", "俄语"),
     ("zh", "中文"),
 ]
@@ -69,8 +70,9 @@ TARGET_ORDER = [key for key, _ in TARGETS]
 
 # 每条语料的合法目标语言：中文源不出中文，英文源不出英文
 TARGETS_BY_SOURCE = {
-    "chinese": ["en", "ja", "ko", "fr", "de", "es", "it", "ru"],
-    "english": ["zh", "ja", "ko", "fr", "de", "es", "it", "ru"],
+    "chinese": ["en", "ja", "ko", "fr", "de", "es", "it", "ar", "ru"],
+    "english": ["zh", "ja", "ko", "fr", "de", "es", "it", "ar", "ru"],
+    "arabic": ["zh", "en", "ja", "ko", "fr", "de", "es", "it", "ru"],
 }
 
 # 内置「翻译需求」场景（与 Sources/InstructionPresets.swift 逐字一致）

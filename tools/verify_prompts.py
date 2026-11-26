@@ -41,6 +41,8 @@ SYNTHETIC_SEGMENTS = [
      "english_terms": []},
     {"id": "syn-english", "source": "english",
      "text": "Could you book a table for two at 7 pm, please?", "english_terms": []},
+    {"id": "syn-arabic", "source": "arabic",
+     "text": "مرحبا، هل يمكنك مساعدتي في العثور على أقرب محطة مترو؟", "english_terms": []},
 ]
 
 # 自定义需求：覆盖多行、行首序号、自带标签、纯空白（应视为没有需求）
@@ -51,14 +53,15 @@ CUSTOM_INSTRUCTIONS = [
     "   \n\n  ",
 ]
 
-PRESET_TARGETS = ("en", "ja", "it", "ru", "zh")
-CUSTOM_TARGETS = ("en", "ja", "ru")
+PRESET_TARGETS = ("en", "ja", "it", "ar", "ru", "zh")
+CUSTOM_TARGETS = ("en", "ja", "ar", "ru")
 
 # Swift 枚举的 rawValue（SpeechLanguage / OutputLanguage），case 里同时保留 ISO 键名供 Python 用
-SOURCE_RAW_VALUE = {"chinese": "chinese", "english": "english"}
+SOURCE_RAW_VALUE = {"chinese": "chinese", "english": "english", "arabic": "arabic"}
 TARGET_RAW_VALUE = {
     "en": "english", "ja": "japanese", "ko": "korean", "fr": "french",
-    "de": "german", "es": "spanish", "it": "italian", "ru": "russian", "zh": "chinese",
+    "de": "german", "es": "spanish", "it": "italian", "ar": "arabic",
+    "ru": "russian", "zh": "chinese",
 }
 
 
@@ -99,7 +102,7 @@ def build_cases() -> list:
     # 2) 内置场景：语料子集 × 几个方向（覆盖术语表 + 非术语表 + 新增语言）
     subset = [segment for segment in all_segments
               if segment["id"] in ("zh-01", "zh-02", "zh-06", "zh-12", "en-01", "en-02",
-                                   "syn-empty-terms", "syn-multi-terms", "syn-english")]
+                                   "syn-empty-terms", "syn-multi-terms", "syn-english", "syn-arabic")]
     for preset_name in sorted(prompts.INSTRUCTION_PRESETS):
         instruction = prompts.INSTRUCTION_PRESETS[preset_name]
         for segment in subset:

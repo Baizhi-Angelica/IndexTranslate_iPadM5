@@ -2,7 +2,7 @@
 //  ContentView.swift
 //  ITXTranslate
 //
-//  iPad / iPhone 自适应界面（白底、大字）：
+//  iPad / iPhone 自适应界面（支持浅色/深色外观、大字）：
 //  顶部标题与状态 → 中部译文 / 原文 / 性能 → 底部语言选择 + 麦克风与清空。
 //
 
@@ -11,15 +11,39 @@ import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
 
+private struct TranslationContentHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
+private struct DirectionalBlockModifier: ViewModifier {
+    let isRTL: Bool
+
+    func body(content: Content) -> some View {
+        content
+            .multilineTextAlignment(.leading)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .textSelection(.enabled)
+            .environment(\.layoutDirection, isRTL ? .rightToLeft : .leftToRight)
+    }
+}
+
 struct ContentView: View {
+
+    private static let translationBottomID: String = "translationBottomAnchor"
 
     @StateObject private var model: AppModel = AppModel()
 
     @State private var showInfoSheet: Bool = false
     @State private var showFileImporter: Bool = false
+    @State private var scrollTask: Task<Void, Never>?
 
     /// iPhone 竖屏等紧凑宽度下自动缩字号 / 缩边距
     @Environment(\.horizontalSizeClass) private var hSize
+    @Environment(\.colorScheme) private var colorScheme
 
     private var isCompact: Bool {
         return hSize == .compact
@@ -27,7 +51,7 @@ struct ContentView: View {
 
     var body: some View {
         ZStack {
-            Color.white.ignoresSafeArea()
+            Color(.systemBackground).ignoresSafeArea()
 
             VStack(spacing: isCompact ? 8 : 12) {
                 header
@@ -152,59 +176,108 @@ struct ContentView: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
         .background(RoundedRectangle(cornerRadius: 12, style: .continuous)
-            .fill(Color.red.opacity(0.07)))
+            .fill(Color.red.opacity(colorScheme == .dark ? 0.18 : 0.08)))
     }
 
     // MARK: - 中部：译文 / 原文 / 性能
 
+    private func isRTLText(_ text: String) -> Bool {
+        SpeechLanguage.containsArabic(text)
+    }
+
+    private var translationScrollSignature: String {
+        [
+            model.previousTranslation,
+            model.previousSource,
+            model.translation,
+            model.currentSource,
+        ].joined(separator: "\u{001F}")
+    }
+
+    private func scheduleScrollToBottom(proxy: ScrollViewProxy) {
+        scrollTask?.cancel()
+        scrollTask = Task { @MainActor in
+            // 等 SwiftUI / UIKit 提交新的 contentSize 后再滚到底部锚点，
+            // 防止连续两句长句时停在末尾前而遮住当前句原文小字
+            await Task.yield()
+            try? await Task.sleep(nanoseconds: 35_000_000)
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeOut(duration: 0.18)) {
+                proxy.scrollTo(Self.translationBottomID, anchor: .bottom)
+            }
+        }
+    }
+
     private var translationArea: some View {
         VStack(alignment: .leading, spacing: 8) {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 10) {
-                    // 上一句译文：与当前句同字号，只变灰
-                    if !model.previousTranslation.isEmpty {
-                        Text(model.previousTranslation)
+            ScrollViewReader { (proxy: ScrollViewProxy) in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 10) {
+                        // 上一句译文：与当前句同字号，只变灰
+                        if !model.previousTranslation.isEmpty {
+                            Text(model.previousTranslation)
+                                .font(.system(size: isCompact ? 30 : 40, weight: .semibold))
+                                .foregroundStyle(Color.secondary)
+                                .lineLimit(2)
+                                .minimumScaleFactor(0.6)
+                                .modifier(DirectionalBlockModifier(isRTL: isRTLText(model.previousTranslation)))
+                        }
+
+                        // 上一句原文：更小一号、更淡；没有就完全不占位
+                        if !model.previousSource.isEmpty {
+                            Text(model.previousSource)
+                                .font(.system(size: 14))
+                                .foregroundStyle(Color.secondary.opacity(0.75))
+                                .lineLimit(1)
+                                .modifier(DirectionalBlockModifier(isRTL: isRTLText(model.previousSource)))
+                        }
+
+                        // 当前句译文：保持大字（空状态提示为中文，仅在有实际译文时按文本语种切 RTL）
+                        Text(translationDisplayText)
                             .font(.system(size: isCompact ? 30 : 40, weight: .semibold))
-                            .foregroundStyle(Color.secondary)
-                            .lineLimit(2)
-                            .minimumScaleFactor(0.6)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .textSelection(.enabled)
+                            .minimumScaleFactor(0.5)
+                            .foregroundStyle(model.translation.isEmpty ? Color.secondary.opacity(0.55) : Color.primary)
+                            .modifier(DirectionalBlockModifier(
+                                isRTL: !model.translation.isEmpty && isRTLText(model.translation)
+                            ))
+
+                        // 当前句原文：灰色小字（只显示这一句，不累积整场）
+                        if !model.currentSource.isEmpty {
+                            Text(model.currentSource)
+                                .font(.system(size: isCompact ? 16 : 18))
+                                .foregroundStyle(Color.secondary)
+                                .lineLimit(3)
+                                .modifier(DirectionalBlockModifier(isRTL: isRTLText(model.currentSource)))
+                        }
+
+                        // 底部锚点：确保 scrollTo(..., anchor: .bottom) 滚到最新句原文小字之后
+                        Color.clear
+                            .frame(height: 1)
+                            .id(Self.translationBottomID)
                     }
-
-                    // 上一句原文：更小一号、更淡；没有就完全不占位
-                    if !model.previousSource.isEmpty {
-                        Text(model.previousSource)
-                            .font(.system(size: 14))
-                            .foregroundStyle(Color.secondary.opacity(0.7))
-                            .lineLimit(1)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .textSelection(.enabled)
-                    }
-
-                    // 当前句译文：保持大字
-                    Text(translationDisplayText)
-                        .font(.system(size: isCompact ? 30 : 40, weight: .semibold))
-                        .minimumScaleFactor(0.5)
-                        .foregroundStyle(model.translation.isEmpty ? Color.secondary.opacity(0.55) : Color.primary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .textSelection(.enabled)
-
-                    // 当前句原文：灰色小字（只显示这一句，不累积整场）
-                    Text(model.currentSource)
-                        .font(.system(size: isCompact ? 16 : 18))
-                        .foregroundStyle(Color.secondary)
-                        .lineLimit(3)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(
+                        GeometryReader { (geometry: GeometryProxy) in
+                            Color.clear.preference(key: TranslationContentHeightKey.self,
+                                                   value: geometry.size.height)
+                        }
+                    )
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .scrollIndicators(.hidden)
+                .frame(maxWidth: .infinity,
+                       minHeight: isCompact ? 50 : 90,
+                       maxHeight: isCompact ? 220 : 320,
+                       alignment: .topLeading)
+                .onPreferenceChange(TranslationContentHeightKey.self) { _ in
+                    scheduleScrollToBottom(proxy: proxy)
+                }
+                .onChange(of: translationScrollSignature) { _, _ in
+                    scheduleScrollToBottom(proxy: proxy)
+                }
+                .onChange(of: model.livePartial.isEmpty) { _, _ in
+                    scheduleScrollToBottom(proxy: proxy)
+                }
             }
-            .scrollIndicators(.hidden)
-            .frame(maxWidth: .infinity,
-                   minHeight: isCompact ? 50 : 90,
-                   maxHeight: isCompact ? 220 : 320,
-                   alignment: .topLeading)
 
             metricsRow
 
@@ -221,9 +294,12 @@ struct ContentView: View {
                         .foregroundStyle(Color.blue)
                         .lineLimit(2)
                         .truncationMode(.tail)
+                        .multilineTextAlignment(.leading)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .textSelection(.enabled)
                 }
+                .environment(\.layoutDirection,
+                             (model.inputMode == .arabic || isRTLText(model.livePartial)) ? .rightToLeft : .leftToRight)
                 .padding(.top, 4)
             }
         }
@@ -277,7 +353,7 @@ struct ContentView: View {
             Text("聆听中")
             ZStack(alignment: .leading) {
                 Capsule()
-                    .fill(Color.red.opacity(0.18))
+                    .fill(Color.red.opacity(colorScheme == .dark ? 0.25 : 0.18))
                     .frame(width: 120, height: 6)
                 Capsule()
                     .fill(Color.red)
@@ -378,7 +454,7 @@ struct ContentView: View {
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, isCompact ? 8 : 12)
                         .background(RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .fill(Color(.systemGray6)))
+                            .fill(Color(.tertiarySystemBackground)))
                         .foregroundStyle(Color.primary)
                 }
                 .buttonStyle(.plain)
@@ -403,9 +479,9 @@ struct ContentView: View {
         .padding(isCompact ? 14 : 20)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(RoundedRectangle(cornerRadius: 20, style: .continuous)
-            .fill(Color(.systemGray6).opacity(0.55)))
+            .fill(Color(.secondarySystemBackground).opacity(colorScheme == .dark ? 0.85 : 0.70)))
         .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous)
-            .stroke(Color(.systemGray4), lineWidth: 1))
+            .stroke(Color(.separator), lineWidth: 1))
     }
 
     // MARK: - 输入 / 输出语言选择
@@ -468,7 +544,7 @@ struct ContentView: View {
         }
         .padding(.horizontal, isCompact ? 14 : 18)
         .padding(.vertical, isCompact ? 9 : 11)
-        .background(Capsule().fill(Color(.systemGray6)))
+        .background(Capsule().fill(Color(.secondarySystemBackground)))
         .contentShape(Capsule())
     }
 
@@ -519,7 +595,7 @@ struct ContentView: View {
                 .font(.system(size: isCompact ? 16 : 17, weight: .medium))
                 .padding(.horizontal, isCompact ? 14 : 18)
                 .padding(.vertical, isCompact ? 9 : 11)
-                .background(Capsule().fill(Color(.systemGray6)))
+                .background(Capsule().fill(Color(.secondarySystemBackground)))
                 .foregroundStyle(Color.primary)
         }
         .buttonStyle(.plain)
@@ -534,6 +610,7 @@ private struct InfoSheet: View {
 
     @ObservedObject var model: AppModel
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.colorScheme) private var colorScheme
 
     @State private var didCopyDiagnostics: Bool = false
     @State private var copyToken: Int = 0
@@ -623,8 +700,8 @@ private struct InfoSheet: View {
                                 .padding(.vertical, 9)
                                 .background(RoundedRectangle(cornerRadius: 10, style: .continuous)
                                     .fill(model.currentModelName == entry.name
-                                          ? Color.accentColor.opacity(0.10)
-                                          : Color(.systemGray6)))
+                                          ? Color.accentColor.opacity(colorScheme == .dark ? 0.20 : 0.10)
+                                          : Color(.secondarySystemBackground)))
                             }
                             .buttonStyle(.plain)
                             .disabled(model.isDownloading || model.isListening)
@@ -658,7 +735,7 @@ private struct InfoSheet: View {
                                 .frame(maxWidth: .infinity)
                                 .padding(.vertical, 11)
                                 .background(RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                    .fill(Color(.systemGray6)))
+                                    .fill(Color(.secondarySystemBackground)))
                                 .foregroundStyle(Color.primary)
                         }
                         .buttonStyle(.plain)
@@ -672,7 +749,7 @@ private struct InfoSheet: View {
                                 .frame(maxWidth: .infinity)
                                 .padding(.vertical, 11)
                                 .background(RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                    .fill(Color.accentColor.opacity(0.12)))
+                                    .fill(Color.accentColor.opacity(colorScheme == .dark ? 0.22 : 0.12)))
                                 .foregroundStyle(Color.accentColor)
                         }
                         .buttonStyle(.plain)
@@ -773,7 +850,9 @@ private struct InfoSheet: View {
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 12)
                         .background(RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .fill(didCopyDiagnostics ? Color.green.opacity(0.15) : Color(.systemGray6)))
+                            .fill(didCopyDiagnostics
+                                  ? Color.green.opacity(colorScheme == .dark ? 0.22 : 0.15)
+                                  : Color(.secondarySystemBackground)))
                         .foregroundStyle(didCopyDiagnostics ? Color.green : Color.primary)
                 }
                 .buttonStyle(.plain)
@@ -789,7 +868,7 @@ private struct InfoSheet: View {
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 12)
                         .background(RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .fill(Color.red.opacity(0.08)))
+                            .fill(Color.red.opacity(colorScheme == .dark ? 0.18 : 0.08)))
                         .foregroundStyle(Color.red)
                 }
                 .buttonStyle(.plain)
@@ -870,7 +949,7 @@ private struct InfoSheet: View {
                 .padding(.horizontal, 12)
                 .padding(.vertical, 11)
                 .background(RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(Color(.systemGray6)))
+                    .fill(Color(.secondarySystemBackground)))
             }
             .buttonStyle(.plain)
 
@@ -923,6 +1002,7 @@ private struct InfoSheet: View {
 private struct InstructionPickerView: View {
 
     @ObservedObject var model: AppModel
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         ScrollView {
@@ -988,7 +1068,9 @@ private struct InstructionPickerView: View {
             .padding(.vertical, 10)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(selected ? Color.accentColor.opacity(0.10) : Color(.systemGray6)))
+                .fill(selected
+                      ? Color.accentColor.opacity(colorScheme == .dark ? 0.20 : 0.10)
+                      : Color(.secondarySystemBackground)))
         }
         .buttonStyle(.plain)
     }
@@ -1011,7 +1093,7 @@ private struct InstructionPickerView: View {
                 .frame(minHeight: 96)
                 .padding(8)
                 .background(RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(Color(.systemGray6)))
+                    .fill(Color(.secondarySystemBackground)))
 
                 if model.translationInstruction.isEmpty {
                     Text("例如：回答要简短；称呼对方为「老师」；数字保留阿拉伯数字。")
@@ -1059,7 +1141,7 @@ private struct InstructionPickerView: View {
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(RoundedRectangle(cornerRadius: 10, style: .continuous)
-            .fill(Color(.systemGray6)))
+            .fill(Color(.secondarySystemBackground)))
     }
 
     // MARK: 实际进 prompt 的约束预览
@@ -1090,7 +1172,7 @@ private struct InstructionPickerView: View {
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(RoundedRectangle(cornerRadius: 10, style: .continuous)
-            .fill(Color(.systemGray6).opacity(0.6)))
+            .fill(Color(.secondarySystemBackground).opacity(colorScheme == .dark ? 0.85 : 0.70)))
     }
 
     private func renderedConstraints(_ lines: [String]) -> String {

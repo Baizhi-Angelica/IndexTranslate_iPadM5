@@ -2,7 +2,7 @@
 //  ITXApp.swift
 //  ITXTranslate
 //
-//  App 入口。界面固定浅色（白底大字），不做深色模式适配。
+//  App 入口。界面跟随系统浅色/深色外观自适应。
 //
 
 import SwiftUI
@@ -13,7 +13,6 @@ struct ITXTranslateApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
-                .preferredColorScheme(.light)
         }
     }
 }
