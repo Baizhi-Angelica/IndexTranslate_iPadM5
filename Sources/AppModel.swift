@@ -75,6 +75,16 @@ final class AppModel: ObservableObject {
     @Published var level: Double = 0
     @Published var modelName: String = ""
     @Published var supportedLocalesText: String = ""
+    /// 当前系统为语音识别分配（占用）的 locale 列表（规范化标识符排序，如 ar-SA, en-US, zh-CN）
+    @Published var reservedLocales: [String] = []
+    /// 系统允许同时占用的语音识别语言上限（iPadOS 26 一般为 5）
+    @Published var maximumReservedLocales: Int = 0
+    /// 识别启动因占用语言达到上限失败时，在错误横幅右侧显示一键清除按钮
+    @Published var showReleaseLocalesAction: Bool = false
+    /// 正在执行释放非中/英识别语言
+    @Published var isReleasingLocales: Bool = false
+    /// 释放识别语言后的简短结果反馈（供 ⓘ 面板就地显示）
+    @Published var localeReleaseFeedback: String = ""
     @Published var isDownloading: Bool = false
     @Published var downloadProgress: Double = 0
     /// 已下载 / 总字节数（服务器没给 Content-Length 时 total 为 0）
@@ -151,7 +161,7 @@ final class AppModel: ObservableObject {
     /// 清空时自增，让在途的模型加载/翻译结果作废
     private var generation: Int = 0
     private var isLoadingTask: Bool = false
-    private var isStartingListening: Bool = false
+    @Published private(set) var isStartingListening: Bool = false
     private var isSwitchingModel: Bool = false
     /// 当前加载的模型文件名（用于 refreshModels 判断选中项）
     private var loadedModelFileName: String = ""
@@ -171,6 +181,7 @@ final class AppModel: ObservableObject {
         refreshModels()
         loadModelIfNeeded()
         supportedLocalesText = await AppModel.loadSupportedLocalesText()
+        await refreshReservedSpeechLocales()
     }
 
     /// 找模型并异步加载。找不到就把状态留在“未找到模型，请下载或导入”。
@@ -218,11 +229,11 @@ final class AppModel: ObservableObject {
                     // 优先用户选中的模型名（下载/切换都会写 UserDefaults），否则用刚找到的文件名
                     self.currentModelName = ModelStore.selectedModelName() ?? fileName
                     self.refreshModels()
-                    self.errorMessage = ""
+                    self.clearError()
                     self.statusText = "就绪"
                 } else {
                     self.statusText = "模型加载失败"
-                    self.errorMessage = "模型加载失败：未能建立推理上下文。"
+                    self.setError("模型加载失败：未能建立推理上下文。")
                 }
             } catch {
                 guard currentGeneration == self.generation else {
@@ -234,7 +245,7 @@ final class AppModel: ObservableObject {
                 self.isLoadingTask = false
                 self.isLoadingModel = false
                 self.statusText = "模型加载失败"
-                self.errorMessage = "模型加载失败：" + error.localizedDescription
+                self.setError("模型加载失败：" + error.localizedDescription)
             }
         }
     }
@@ -264,7 +275,7 @@ final class AppModel: ObservableObject {
         isSwitchingModel = true
         isModelReady = false
         isLoadingModel = true
-        errorMessage = ""
+        clearError()
         statusText = "正在加载模型…"
         currentModelName = name
         generation += 1
@@ -329,11 +340,11 @@ final class AppModel: ObservableObject {
             return
         }
         if isDownloading {
-            errorMessage = "模型正在下载，请稍候再试。"
+            setError("模型正在下载，请稍候再试。")
             return
         }
         guard isModelReady else {
-            errorMessage = "模型未就绪：请先下载或导入模型。"
+            setError("模型未就绪：请先下载或导入模型。")
             return
         }
         Task { @MainActor in
@@ -348,11 +359,11 @@ final class AppModel: ObservableObject {
 
         let granted: Bool = await AppModel.requestMicPermission()
         guard granted else {
-            errorMessage = "麦克风权限未开启：请到 设置 → 隐私与安全性 → 麦克风 中允许本 App。"
+            setError("麦克风权限未开启：请到 设置 → 隐私与安全性 → 麦克风 中允许本 App。")
             return
         }
         guard isModelReady else {
-            errorMessage = "模型未就绪：请先下载或导入模型。"
+            setError("模型未就绪：请先下载或导入模型。")
             return
         }
 
@@ -368,7 +379,7 @@ final class AppModel: ObservableObject {
         flushToken += 1
         statusNoticeToken += 1
         statusNoticeUntil = nil
-        errorMessage = ""
+        clearError()
 
         // 优先 iOS 26 的 SpeechAnalyzer；硬件/资源不支持时自动降级到 SFSpeechRecognizer（设备端）
         let factoryResult: (engine: any ASREngine, name: String) = ASRFactory.make()
@@ -376,7 +387,7 @@ final class AppModel: ObservableObject {
         asrEngineName = factoryResult.name
 
         guard let engine = asr else {
-            errorMessage = "语音识别组件初始化失败。"
+            setError("语音识别组件初始化失败。")
             return
         }
 
@@ -406,11 +417,14 @@ final class AppModel: ObservableObject {
             level = 0
             statusText = "聆听中…（" + asrEngineName + "）"
             UIApplication.shared.isIdleTimerDisabled = true
+            Task { @MainActor [weak self] in
+                await self?.refreshReservedSpeechLocales()
+            }
         } catch {
             asr = nil
             isListening = false
             UIApplication.shared.isIdleTimerDisabled = false
-            errorMessage = "语音识别启动失败：" + error.localizedDescription
+            await handleSpeechStartError(error)
             statusText = isModelReady ? "就绪" : statusText
         }
     }
@@ -473,7 +487,7 @@ final class AppModel: ObservableObject {
             level = max(normalized, level * 0.80)
 
         case let .error(message):
-            errorMessage = message
+            handleSpeechErrorMessage(message)
         }
     }
 
@@ -717,7 +731,7 @@ final class AppModel: ObservableObject {
         let trimmed: String = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         guard isModelReady else {
-            errorMessage = "模型未就绪，无法翻译。"
+            setError("模型未就绪，无法翻译。")
             return
         }
 
@@ -788,7 +802,7 @@ final class AppModel: ObservableObject {
                 }
             } catch {
                 if currentGeneration == self.generation {
-                    self.errorMessage = "翻译失败：" + error.localizedDescription
+                    self.setError("翻译失败：" + error.localizedDescription)
                 }
             }
             self.isPumping = false
@@ -817,7 +831,7 @@ final class AppModel: ObservableObject {
         downloadProgress = 0
         downloadReceivedBytes = 0
         downloadTotalBytes = 0
-        errorMessage = ""
+        clearError()
         statusText = "正在下载模型…"
 
         Task { @MainActor in
@@ -855,7 +869,7 @@ final class AppModel: ObservableObject {
             } catch {
                 self.isDownloading = false
                 self.statusText = "模型下载失败"
-                self.errorMessage = "模型下载失败：" + error.localizedDescription
+                self.setError("模型下载失败：" + error.localizedDescription)
             }
         }
     }
@@ -868,7 +882,7 @@ final class AppModel: ObservableObject {
     /// 文件选择器拿到的 URL 直接交给 ModelStore（安全作用域访问由它处理）。
     func importModel(url: URL) {
         guard !isDownloading, !isLoadingTask, !isListening else { return }
-        errorMessage = ""
+        clearError()
         statusText = "正在导入模型…"
         isLoadingModel = true
         let sourceURL: URL = url
@@ -892,7 +906,7 @@ final class AppModel: ObservableObject {
             } catch {
                 self.isLoadingModel = false
                 self.statusText = "模型导入失败"
-                self.errorMessage = "模型导入失败：" + error.localizedDescription
+                self.setError("模型导入失败：" + error.localizedDescription)
             }
         }
     }
@@ -992,6 +1006,199 @@ final class AppModel: ObservableObject {
         UserDefaults.standard.set(activeInstruction, forKey: TranslationInstructionStore.textKey)
     }
 
+    // MARK: - 语音识别语言占用管理
+
+    /// 将 Locale 规范化为连字符标识符（如 zh_CN -> zh-CN），便于展示与比对。
+    private static func normalizedLocaleIdentifier(_ locale: Locale) -> String {
+        return locale.identifier.replacingOccurrences(of: "_", with: "-")
+    }
+
+    /// 是否为核心识别语言（中文 zh* 或英文 en*）；释放非核心语言时保留这两类。
+    private static func isCoreSpeechLocale(_ locale: Locale) -> Bool {
+        let langCode: String = (locale.language.languageCode?.identifier ?? "").lowercased()
+        let idLower: String = normalizedLocaleIdentifier(locale).lowercased()
+        return langCode.hasPrefix("zh") || idLower.hasPrefix("zh")
+            || langCode.hasPrefix("en") || idLower.hasPrefix("en")
+    }
+
+    /// 刷新当前系统为语音识别分配（占用）的 locale 列表与上限。
+    func refreshReservedSpeechLocales() async {
+        if #available(iOS 26.0, *) {
+            let locales: [Locale] = await AssetInventory.reservedLocales
+            let maxCount: Int = AssetInventory.maximumReservedLocales
+            var identifiers: [String] = []
+            identifiers.reserveCapacity(locales.count)
+            for locale in locales {
+                identifiers.append(AppModel.normalizedLocaleIdentifier(locale))
+            }
+            identifiers.sort()
+            reservedLocales = identifiers
+            maximumReservedLocales = maxCount
+        } else {
+            reservedLocales = []
+            maximumReservedLocales = 0
+        }
+    }
+
+    /// 释放除中文（zh*）和英文（en*）以外的所有已占用语音识别语言。
+    func releaseNonCoreSpeechLocales() async {
+        guard !isListening, !isStartingListening, !isReleasingLocales else { return }
+        guard #available(iOS 26.0, *) else {
+            let msg: String = "需要 iPadOS 26 及以上才支持管理识别语言占用。"
+            localeReleaseFeedback = msg
+            if isModelReady {
+                showStatusNotice(msg, duration: 4.0)
+            }
+            return
+        }
+
+        isReleasingLocales = true
+        defer { isReleasingLocales = false }
+
+        let currentReserved: [Locale] = await AssetInventory.reservedLocales
+        let targets: [Locale] = currentReserved.filter { !AppModel.isCoreSpeechLocale($0) }
+
+        if targets.isEmpty {
+            await refreshReservedSpeechLocales()
+            clearError()
+            let msg: String = "当前没有可释放的其他识别语言（仅保留中文/英文）。"
+            localeReleaseFeedback = msg
+            if isModelReady {
+                showStatusNotice(msg, duration: 4.0)
+            }
+            return
+        }
+
+        var releasedIDs: [String] = []
+        var failedIDs: [String] = []
+        for locale in targets {
+            let identifier: String = AppModel.normalizedLocaleIdentifier(locale)
+            let released: Bool = await AssetInventory.release(reservedLocale: locale)
+            if released {
+                releasedIDs.append(identifier)
+            } else {
+                failedIDs.append(identifier)
+            }
+        }
+
+        releasedIDs.sort()
+        failedIDs.sort()
+
+        if !releasedIDs.isEmpty {
+            print("[SpeechAsset] 已释放识别语言：", releasedIDs.joined(separator: ", "))
+        }
+        if !failedIDs.isEmpty {
+            print("[SpeechAsset] 释放失败的识别语言：", failedIDs.joined(separator: ", "))
+        }
+
+        await refreshReservedSpeechLocales()
+
+        if failedIDs.isEmpty {
+            clearError()
+            let listText: String = releasedIDs.joined(separator: ", ")
+            let msg: String = "已释放 \(releasedIDs.count) 个识别语言：\(listText)；现在可以重新开始聆听"
+            localeReleaseFeedback = msg
+            if isModelReady {
+                showStatusNotice(msg, duration: 5.0)
+            }
+        } else if !releasedIDs.isEmpty {
+            let msg: String = "已释放 \(releasedIDs.count) 个识别语言（\(releasedIDs.joined(separator: ", "))），以下释放失败：\(failedIDs.joined(separator: ", "))"
+            setError(msg)
+            localeReleaseFeedback = msg
+            if isModelReady {
+                showStatusNotice("部分识别语言释放失败", duration: 4.0)
+            }
+        } else {
+            let msg: String = "未能释放识别语言（\(failedIDs.joined(separator: ", "))），请稍后再试或重启 App。"
+            setError(msg)
+            localeReleaseFeedback = msg
+        }
+    }
+
+    /// 供 ⓘ 面板显示的当前占用概览（如：已占用 3/5：zh-CN, en-US, ar-SA）。
+    var reservedLocalesSummary: String {
+        if #available(iOS 26.0, *) {
+            if maximumReservedLocales > 0 {
+                let list: String = reservedLocales.isEmpty ? "无" : reservedLocales.joined(separator: ", ")
+                return "已占用 \(reservedLocales.count)/\(maximumReservedLocales)：\(list)"
+            }
+            return "读取中…"
+        }
+        return "需要 iPadOS 26 及以上才支持系统语音识别"
+    }
+
+    /// 供「复制诊断」使用的当前占用文本。
+    private var reservedLocalesDiagnosticText: String {
+        if #available(iOS 26.0, *) {
+            if maximumReservedLocales > 0 {
+                let list: String = reservedLocales.isEmpty ? "无" : reservedLocales.joined(separator: ", ")
+                return "\(reservedLocales.count)/\(maximumReservedLocales)（\(list)）"
+            }
+            return "尚未读取"
+        }
+        return "需要 iPadOS 26+"
+    }
+
+    private static func isTooManyAllocatedLocalesMessage(_ message: String) -> Bool {
+        let lower: String = message.lowercased()
+        return lower.contains("too many allocated locales")
+            || lower.contains("allocated locales")
+    }
+
+    private static func isTooManyAllocatedLocalesError(_ error: Error) -> Bool {
+        if #available(iOS 26.0, *) {
+            let nsError: NSError = error as NSError
+            if nsError.domain == SFSpeechError.errorDomain,
+               nsError.code == SFSpeechError.Code.tooManyAssetLocalesAllocated.rawValue {
+                return true
+            }
+            if let underlying: NSError = nsError.userInfo[NSUnderlyingErrorKey] as? NSError {
+                if underlying.domain == SFSpeechError.errorDomain,
+                   underlying.code == SFSpeechError.Code.tooManyAssetLocalesAllocated.rawValue {
+                    return true
+                }
+                if isTooManyAllocatedLocalesMessage(underlying.localizedDescription) {
+                    return true
+                }
+            }
+        }
+        return isTooManyAllocatedLocalesMessage(error.localizedDescription)
+    }
+
+    private func tooManyLocalesErrorMessage() -> String {
+        let maxText: String = maximumReservedLocales > 0 ? String(maximumReservedLocales) : "5"
+        let listText: String = reservedLocales.isEmpty ? "暂无" : reservedLocales.joined(separator: ", ")
+        return "系统语音识别语言占用已达上限（最多 \(maxText) 个，当前已占用：\(listText)）。请点右侧按钮清除中/英以外的识别语言后再试。"
+    }
+
+    private func handleSpeechStartError(_ error: Error) async {
+        await refreshReservedSpeechLocales()
+        if AppModel.isTooManyAllocatedLocalesError(error) {
+            showReleaseLocalesAction = true
+            errorMessage = tooManyLocalesErrorMessage()
+        } else {
+            setError("语音识别启动失败：" + error.localizedDescription)
+        }
+    }
+
+    private func handleSpeechErrorMessage(_ message: String) {
+        if AppModel.isTooManyAllocatedLocalesMessage(message) {
+            Task { @MainActor [weak self] in
+                guard let self = self else { return }
+                await self.refreshReservedSpeechLocales()
+                self.showReleaseLocalesAction = true
+                self.errorMessage = self.tooManyLocalesErrorMessage()
+            }
+        } else {
+            setError(message)
+        }
+    }
+
+    private func setError(_ message: String) {
+        showReleaseLocalesAction = false
+        errorMessage = message
+    }
+
     // MARK: - 其它
 
     /// 「复制诊断」用的多行文本。
@@ -1015,6 +1222,7 @@ final class AppModel: ObservableObject {
         lines.append("延迟：" + (lastLatencyMS > 0 ? String(lastLatencyMS) + " ms" : "暂无"))
         lines.append("错误：" + (errorMessage.isEmpty ? "无" : errorMessage))
         lines.append("支持语言：" + (supportedLocalesText.isEmpty ? "暂无" : supportedLocalesText))
+        lines.append("已占用识别语言：" + reservedLocalesDiagnosticText)
         lines.append("状态：" + statusText)
         return lines.joined(separator: "\n")
     }
@@ -1033,7 +1241,8 @@ final class AppModel: ObservableObject {
         lastLatencyMS = 0
         level = 0
         levelPeak = 0.45
-        errorMessage = ""
+        clearError()
+        localeReleaseFeedback = ""
         isTranslating = false
         pendingFinals.removeAll()
         pendingFirstArrival = nil
@@ -1049,9 +1258,10 @@ final class AppModel: ObservableObject {
 
     func clearError() {
         errorMessage = ""
+        showReleaseLocalesAction = false
     }
 
     func reportError(_ message: String) {
-        errorMessage = message
+        handleSpeechErrorMessage(message)
     }
 }

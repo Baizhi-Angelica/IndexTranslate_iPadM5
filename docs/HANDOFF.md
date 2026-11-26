@@ -309,3 +309,12 @@ Windows CPU 上平均延迟 +约 110 ms；真机 prefill 44,000 tok/s，折算�
 `build-*` 预发布是 CI 自动产物，ipa 固定叫 `ITXTranslate-unsigned.ipa`。**给用户测试的版本要另外手动发**：
 下载 CI 产物 → 核对 `Info.plist` 版本号 → 改名为 `index-translate-vX.Y.Z[-beta.N]-unsigned.ipa` →
 `gh release create vX.Y.Z[-beta.N] --prerelease` 并写 release notes（参考 `v1.2.0-beta.1`）。
+
+### v1.3.0-beta.2（同日）：识别语言占用上限
+
+- 真机反馈：阿拉伯语输入启动失败 `Too many allocated locales, 5 maximum.`。原因是 `AssetInventory` 会为 App 用过的每个识别语言保留一个名额（`AssetInventory.maximumReservedLocales`，真机为 5），中/英/日/意等占满后新语言装不上。
+- 处理：`AppModel.releaseNonCoreSpeechLocales()` 释放除 zh* / en* 以外的 `AssetInventory.reservedLocales`；
+  启动识别遇到该错误（`SFSpeechError.Code.tooManyAssetLocalesAllocated` 或文案匹配）时，错误横幅右侧出现「一键清除其他语言」；
+  ⓘ 面板常驻「识别语言占用 n/max」+ 清除按钮；复制诊断里带占用列表。
+- 不做自动释放：用户明确要按钮；被释放的语言下次使用时系统会重新下载识别资源。
+- 版本：`1.3.0`（build 6）。

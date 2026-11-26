@@ -151,7 +151,7 @@ struct ContentView: View {
     }
 
     private var errorBanner: some View {
-        HStack(alignment: .top, spacing: 10) {
+        HStack(alignment: .center, spacing: 10) {
             Image(systemName: "exclamationmark.circle.fill")
                 .font(.system(size: 16, weight: .medium))
                 .foregroundStyle(Color.red)
@@ -161,7 +161,35 @@ struct ContentView: View {
                 .foregroundStyle(Color.primary)
                 .fixedSize(horizontal: false, vertical: true)
 
-            Spacer(minLength: 0)
+            Spacer(minLength: 8)
+
+            if model.showReleaseLocalesAction {
+                Button {
+                    Task { @MainActor in
+                        await model.releaseNonCoreSpeechLocales()
+                    }
+                } label: {
+                    HStack(spacing: 5) {
+                        if model.isReleasingLocales {
+                            ProgressView()
+                                .controlSize(.small)
+                        } else {
+                            Image(systemName: "trash")
+                                .font(.system(size: 12, weight: .semibold))
+                        }
+                        Text(model.isReleasingLocales ? "清除中…" : "一键清除其他语言")
+                            .font(.system(size: 13, weight: .semibold))
+                            .lineLimit(1)
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(Capsule().fill(Color.red.opacity(colorScheme == .dark ? 0.28 : 0.14)))
+                    .foregroundStyle(Color.red)
+                }
+                .buttonStyle(.plain)
+                .disabled(model.isReleasingLocales || model.isListening || model.isStartingListening)
+                .accessibilityLabel("一键清除中英文以外的识别语言")
+            }
 
             Button {
                 model.clearError()
@@ -804,6 +832,8 @@ private struct InfoSheet: View {
                 infoBlock(title: "支持的语言（前 8 个）",
                           value: supportedLocalesPreview)
 
+                reservedLocalesSection
+
                 infoBlock(title: "最近一次性能",
                           value: model.metrics.isEmpty ? "暂无" : model.metrics)
 
@@ -914,6 +944,63 @@ private struct InfoSheet: View {
         .toolbar(.hidden, for: .navigationBar)
             .onAppear {
                 model.refreshModels()
+                model.localeReleaseFeedback = ""
+            }
+            .task {
+                await model.refreshReservedSpeechLocales()
+            }
+        }
+    }
+
+    // MARK: 识别语言占用管理
+
+    private var reservedLocalesSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("识别语言占用")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(Color.secondary)
+
+            Text(model.reservedLocalesSummary)
+                .font(.system(size: 15))
+                .foregroundStyle(Color.primary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Button {
+                Task { @MainActor in
+                    await model.releaseNonCoreSpeechLocales()
+                }
+            } label: {
+                HStack(spacing: 8) {
+                    if model.isReleasingLocales {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else {
+                        Image(systemName: "trash")
+                            .font(.system(size: 15, weight: .medium))
+                    }
+                    Text(model.isReleasingLocales ? "正在清除…" : "清除中/英以外的识别语言")
+                        .font(.system(size: 15, weight: .medium))
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 11)
+                .background(RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(Color(.secondarySystemBackground)))
+                .foregroundStyle(Color.primary)
+            }
+            .buttonStyle(.plain)
+            .disabled(model.isListening || model.isStartingListening || model.isReleasingLocales)
+            .accessibilityLabel("清除中英文以外的识别语言")
+
+            Text("系统最多同时占用 \(model.maximumReservedLocales > 0 ? model.maximumReservedLocales : 5) 个语音识别语言；切换多种小语种后如无法启动，可点此释放（会保留中文和英文）。")
+                .font(.system(size: 12))
+                .foregroundStyle(Color.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if !model.localeReleaseFeedback.isEmpty {
+                Text(model.localeReleaseFeedback)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(model.errorMessage.isEmpty ? Color.green : Color.red)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
     }
