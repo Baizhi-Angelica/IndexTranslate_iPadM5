@@ -72,7 +72,6 @@ TARGET_ORDER = [key for key, _ in TARGETS]
 TARGETS_BY_SOURCE = {
     "chinese": ["en", "ja", "ko", "fr", "de", "es", "it", "ar", "ru"],
     "english": ["zh", "ja", "ko", "fr", "de", "es", "it", "ar", "ru"],
-    "arabic": ["zh", "en", "ja", "ko", "fr", "de", "es", "it", "ru"],
 }
 
 # 内置「翻译需求」场景（与 Sources/InstructionPresets.swift 逐字一致）

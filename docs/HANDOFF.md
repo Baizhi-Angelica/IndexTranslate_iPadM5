@@ -1,6 +1,6 @@
 # 交接笔记：写给下一个接手这个项目的人（或模型）
 
-> 最后更新：2026-11-23，对应 `index-translate v1.2.0`（正式版，用户真机测试 OK）。
+> 最后更新：2026-11-26，对应 `index-translate v1.3.0`（正式版，用户真机测试 OK）。
 > 先读这份，再读 `AGENTS.md`（硬约束）、`PLAN.md`（决策）、`PITFALLS.md`（踩坑）。
 > 这份的语气会比较直白：它记的是"当时为什么这么做"，以及"哪些地方我其实没把握"。
 
@@ -8,11 +8,11 @@
 
 ## 1. 一句话现状
 
-**iPad Pro M5 上已经有一个能用的、全离线的语音翻译 App**：说 8 种语言之一（中/英/日/韩/法/德/西/意）→ 系统 `SpeechAnalyzer` 转写 → `Index-Translate-2B`（GGUF, llama.cpp + Metal）翻译 → 9 种语言输出（多一个俄语，仅输出），中英混说时英文词原样保留。ⓘ 里还能选「翻译需求」（说话场景 / 自定义要求）。代码在 GitHub，ipa 在 Releases，装机靠 Windows + Sideloadly + 免费 Apple ID。
+**iPad Pro M5 上已经有一个能用的、全离线的语音翻译 App**：说 8 种语言之一（中/英/日/韩/法/德/西/意）→ 系统 `SpeechAnalyzer` 转写 → `Index-Translate-2B`（GGUF, llama.cpp + Metal）翻译 → 10 种语言输出（阿拉伯语与俄语仅输出，阿拉伯语自动 RTL 右对齐排版），中英混说时英文词原样保留。ⓘ 里还能选「翻译需求」（说话场景 / 自定义要求）、管理 5 语种识别资源占用；界面跟随系统深色模式，长句自动滚底。代码在 GitHub，ipa 在 Releases，装机靠 Windows + Sideloadly + 免费 Apple ID。
 
 - 仓库：<https://github.com/Baizhi-Angelica/IndexTranslate_iPadM5>
-- 最新版：`v1.2.0`（翻译需求 + 意大利语输入输出 + 俄语输出；<https://github.com/Baizhi-Angelica/IndexTranslate_iPadM5/releases/tag/v1.2.0>）。上一版 `v1.1.0`（7 种输入语言 + 配对窗口 0.7 s）作为历史版本保留
-- 测试过程：`v1.2.0-beta.1`（2026-11-23，用户真机测试 OK）→ 正式版 `v1.2.0`（只多了 ⓘ 面板里的版本号显示与 About 更新说明）
+- 最新版：`v1.3.0`（阿拉伯语输出 RTL + 深色模式 + 长句自动滚底 + 识别语言占用一键清除；<https://github.com/Baizhi-Angelica/IndexTranslate_iPadM5/releases/tag/v1.3.0>）。上一版 `v1.2.0`（翻译需求 + 意大利语输入输出 + 俄语输出）作为历史版本保留
+- 测试过程：`v1.3.0-beta.1` → `v1.3.0-beta.2`（2026-11-26，真机实测 RTL/深色/滚底/占用清除均 OK，但 `ar-SA` 下载报 `transcription.ar asset not found after attemped download`）→ 正式版 `v1.3.0`（将阿拉伯语改为仅输出）
 - 演示视频：<https://www.bilibili.com/video/BV151sH6EE81>
 - 前一代（先导实验，Android）：<https://github.com/Baizhi-Angelica/IndexTranslate_OnXiaomi>
 
@@ -156,7 +156,7 @@ python make_tts.py; python make_slides.py --force; python make_video.py
 ## 9. 交接检查清单
 
 - [ ] `gh run list` 最新一次是 success；`gh release list` 最新是正式版
-- [ ] 改了 `PromptBuilder` / 语言枚举 → `verify-prompts.yml` 绿（396 条 case 逐字节一致）
+- [ ] 改了 `PromptBuilder` / 语言枚举 → `verify-prompts.yml` 绿（476 条 case 逐字节一致）
 - [ ] 下载 ipa 后核对：`Info.plist` 里 `CFBundleShortVersionString` 与 release tag 一致
 - [ ] ipa 里 `Payload/ITXTranslate.app/Frameworks/llama.framework/llama` 存在（否则装上必崩）
 - [ ] 手机上如有 crispasr 残留进程/临时目录，已清理
@@ -290,31 +290,30 @@ Windows CPU 上平均延迟 +约 110 ms；真机 prefill 44,000 tok/s，折算�
 
 ---
 
-## 12. 2026-11-26：v1.3.0-beta.1（阿拉伯语 / 深色模式 / 长句滚动修复）
+## 12. 2026-11-26：v1.3.0（阿拉伯语输出 RTL / 深色模式 / 长句自动滚底 / 识别语言占用一键清除）
 
-- **阿拉伯语输入 + 输出**：`ar-SA` 已在真机 `supportedLocales` 的 31 个语言区里（见 `REALMACHINE-NOTES.md`）；prompt 语言名用官方的「阿拉伯语」。
-  `SpeechLanguage.containsArabic` 判断文字方向；`DirectionalBlockModifier` 让阿拉伯文那几行按 RTL 排版、右对齐。
-  分句拼接：除中文 / 日语外，其它源语言（含阿拉伯语、韩语）在定稿片段之间都加空格。
-- **深色模式**：去掉了 `.preferredColorScheme(.light)`，背景 / 卡片换成系统语义色（`systemBackground` / `secondarySystemBackground` 等），深色下浅色填充的透明度调高了一点。
-- **长句滚动**：译文区包了 `ScrollViewReader`，最后放一个底部锚点；内容高度变化（`TranslationContentHeightKey`）或文字变化后等一帧 + 35 ms 再 `scrollTo(.bottom)`，修复「两句都很长时停在倒数位置、看不到最新一句原文小字」。
-- 验证：`build-26` CI 编译 + bundle check、`verify prompt bytes`（510 条 case，含阿拉伯语源 / 目标）都通过；ipa 内 `CFBundleShortVersionString=1.3.0`、`CFBundleVersion=5`。
+### 演进过程（beta.1 → beta.2 → 正式版 v1.3.0）
+
+1. **`v1.3.0-beta.1`**（build 5）：
+   - 接入阿拉伯语输入（`ar-SA`）与输出（`العربية`）、`SpeechLanguage.containsArabic` + `DirectionalBlockModifier`（RTL 右对齐排版）。
+   - 移除 `.preferredColorScheme(.light)`，全面适配系统深色模式。
+   - 译文区加入 `ScrollViewReader` + 底部锚点 + `TranslationContentHeightKey`，修复连续两句长句时底部原文小字被遮住的问题。
+2. **`v1.3.0-beta.2`**（build 6）：
+   - 真机 `beta.1` 反馈触发 `Too many allocated locales, 5 maximum.`（`AssetInventory.maximumReservedLocales` 为 5，切换多语种占满后无法新增识别语言）。
+   - 新增 `AppModel.releaseNonCoreSpeechLocales()` 释放除 `zh*` / `en*` 以外的保留语种；报错横幅右侧提供「一键清除其他语言」，ⓘ 面板常驻「识别语言占用 n/max」与清除按钮，复制诊断附带占用列表。
+   - **真机关键发现**：在 `beta.2` 上清除占用后实测阿拉伯语输入，确认 **RTL 排版、深色模式、长句滚底、占用一键清除全部 OK**（实拍截图见 `docs/images/output-arabic.jpg`，中文→阿拉伯语 `prefill 105 tok/2 ms · decode 20 tok/416 ms · 48.1 tok/s · 418 ms`）；但 `ar-SA` 在系统下载识别资产阶段报错 **`transcription.ar asset not found after attemped download`**（虽然 `ar-SA` 列在 `SpeechTranscriber.supportedLocales` 里，Apple 服务端实际没有提供可下载的阿拉伯语转写资产）。
+3. **正式版 `v1.3.0`**（`CFBundleShortVersionString=1.3.0`、`CFBundleVersion=7`）：
+   - 与俄语保持一致，将阿拉伯语改为**仅输出**（从 `InputMode`、`SpeechLanguage` 中移除 `case arabic`；`OutputLanguage.arabic` 保留且 `speechLanguage` 返回 `nil`；保留 `SpeechLanguage.containsArabic(_:)` / `isArabic(_:)` 供译文与原文 RTL 排版使用）。
+   - 同步更新 `ContentView.swift`（移除 `livePartial` 上残留的 `model.inputMode == .arabic` 判断，更新 ⓘ About 文案）、`tools/segments.py`、`tools/regress_prompts.py`、`tools/verify_prompts.py`（移除阿拉伯语源与 `syn-arabic`，保留 `"ar"` 目标语言；`verify_prompts.py` 共生成 476 条 case）。
+   - 更新 `README.md`、`README.en.md`、`docs/INSTALL-IPAD.md`、`docs/PLAN.md`、`docs/REALMACHINE-NOTES.md`、`docs/HANDOFF.md` 并收入实机截图 `docs/images/output-arabic.jpg`。
 
 ### 没验证的地方
 
-- **没跑 `tools/regress_prompts.py` 的阿拉伯语模型回归**（Windows CPU 上的译文质量 / 英文词保留率都没有数字）。
-- 真机没测：阿拉伯语识别资源首次下载、RTL 排版观感、深色模式下各卡片对比度、自动滚动在手动上拉看旧内容时会不会把你拽回底部。
+- **没跑 `tools/regress_prompts.py --targets ar` 的阿拉伯语目标回归**（Windows CPU 上的英文词保留率暂无批量回归统计；真机实拍中中文→阿拉伯语译文与延迟正常）。
+- 自动滚动在手动上拉回看旧译文时是否会干扰手势，需后续真机长对话观察。
 
 ### 发版流程备忘（重要）
 
-`build-*` 预发布是 CI 自动产物，ipa 固定叫 `ITXTranslate-unsigned.ipa`。**给用户测试的版本要另外手动发**：
-下载 CI 产物 → 核对 `Info.plist` 版本号 → 改名为 `index-translate-vX.Y.Z[-beta.N]-unsigned.ipa` →
-`gh release create vX.Y.Z[-beta.N] --prerelease` 并写 release notes（参考 `v1.2.0-beta.1`）。
-
-### v1.3.0-beta.2（同日）：识别语言占用上限
-
-- 真机反馈：阿拉伯语输入启动失败 `Too many allocated locales, 5 maximum.`。原因是 `AssetInventory` 会为 App 用过的每个识别语言保留一个名额（`AssetInventory.maximumReservedLocales`，真机为 5），中/英/日/意等占满后新语言装不上。
-- 处理：`AppModel.releaseNonCoreSpeechLocales()` 释放除 zh* / en* 以外的 `AssetInventory.reservedLocales`；
-  启动识别遇到该错误（`SFSpeechError.Code.tooManyAssetLocalesAllocated` 或文案匹配）时，错误横幅右侧出现「一键清除其他语言」；
-  ⓘ 面板常驻「识别语言占用 n/max」+ 清除按钮；复制诊断里带占用列表。
-- 不做自动释放：用户明确要按钮；被释放的语言下次使用时系统会重新下载识别资源。
-- 版本：`1.3.0`（build 6）。
+`build-*` 预发布是 CI 自动产物，ipa 固定叫 `ITXTranslate-unsigned.ipa`。**给用户测试/发布的版本要另外手动发**：
+下载 CI 产物 → 核对 `Info.plist` 版本号（`1.3.0` / `7`）→ 改名为 `index-translate-v1.3.0-unsigned.ipa` →
+`gh release create v1.3.0 <ipa> --latest` 并写 release notes。

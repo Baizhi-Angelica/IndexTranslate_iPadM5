@@ -7,7 +7,7 @@ import Foundation
 
 // MARK: - 输入与输出语言
 
-/// 输入模式：自动（zh-CN + en-US 两路，按转写文字判定），或手动指定 9 种输入语言之一
+/// 输入模式：自动（zh-CN + en-US 两路，按转写文字判定），或手动指定 8 种输入语言之一
 enum InputMode: String, CaseIterable, Identifiable {
     case chinese
     case english
@@ -17,7 +17,6 @@ enum InputMode: String, CaseIterable, Identifiable {
     case german
     case spanish
     case italian
-    case arabic
     case auto
 
     var id: String { rawValue }
@@ -32,7 +31,6 @@ enum InputMode: String, CaseIterable, Identifiable {
         case .german:   return "Deutsch"
         case .spanish:  return "Español"
         case .italian:  return "Italiano"
-        case .arabic:   return "العربية"
         case .auto:     return "自动（中/Eng）"
         }
     }
@@ -48,7 +46,6 @@ enum InputMode: String, CaseIterable, Identifiable {
         case .german:   return .german
         case .spanish:  return .spanish
         case .italian:  return .italian
-        case .arabic:   return .arabic
         case .auto:     return nil
         }
     }
@@ -63,9 +60,10 @@ enum InputMode: String, CaseIterable, Identifiable {
     }
 }
 
-/// 输入语言（转写文本的语种）。9 种都与输出语言一一对应。
-/// 注意：俄语目前只有输出（`OutputLanguage.russian`），没有输入——
-/// iPadOS 26 的 `SpeechTranscriber.supportedLocales` 里没有 ru-RU，Apple 还没提供俄语识别模型。
+/// 输入语言（转写文本的语种）。8 种都与输出语言一一对应。
+/// 注意：阿拉伯语和俄语目前只有输出（`OutputLanguage.arabic` / `OutputLanguage.russian`），没有输入——
+/// iPadOS 26 的 `SpeechTranscriber.supportedLocales` 里虽然列出了 `ar-SA`，但真机下载语音资产会以
+/// `transcription.ar asset not found after attemped download` 失败；`ru-RU` 则不在 `supportedLocales` 里。
 enum SpeechLanguage: String, CaseIterable, Identifiable {
     case chinese
     case english
@@ -75,7 +73,6 @@ enum SpeechLanguage: String, CaseIterable, Identifiable {
     case german
     case spanish
     case italian
-    case arabic
 
     var id: String { rawValue }
 
@@ -90,7 +87,6 @@ enum SpeechLanguage: String, CaseIterable, Identifiable {
         case .german:   return "de-DE"
         case .spanish:  return "es-ES"
         case .italian:  return "it-IT"
-        case .arabic:   return "ar-SA"
         }
     }
 
@@ -105,7 +101,6 @@ enum SpeechLanguage: String, CaseIterable, Identifiable {
         case .german:   return "Deutsch"
         case .spanish:  return "Español"
         case .italian:  return "Italiano"
-        case .arabic:   return "العربية"
         }
     }
 
@@ -120,7 +115,6 @@ enum SpeechLanguage: String, CaseIterable, Identifiable {
         case .german:   return "德语"
         case .spanish:  return "西班牙语"
         case .italian:  return "意大利语"
-        case .arabic:   return "阿拉伯语"
         }
     }
 
@@ -135,7 +129,6 @@ enum SpeechLanguage: String, CaseIterable, Identifiable {
         case .german:   return .german
         case .spanish:  return .spanish
         case .italian:  return .italian
-        case .arabic:   return .arabic
         }
     }
 
@@ -153,7 +146,6 @@ enum SpeechLanguage: String, CaseIterable, Identifiable {
         if lower.hasPrefix("de") { return .german }
         if lower.hasPrefix("es") { return .spanish }
         if lower.hasPrefix("it") { return .italian }
-        if lower.hasPrefix("ar") { return .arabic }
         return .english
     }
 
@@ -198,7 +190,9 @@ enum SpeechLanguage: String, CaseIterable, Identifiable {
     }
 }
 
-/// 输出语言（比输入语言多俄语：俄语只作为译文目标，因为系统识别器还不支持 ru-RU）
+/// 输出语言（共 10 种，比输入语言多阿拉伯语和俄语：两者只作为译文目标，
+/// 因为 `ar-SA` 在真机下载识别资产会报 `transcription.ar asset not found after attemped download`，
+/// 而 `ru-RU` 不在系统识别器的 `supportedLocales` 里）。
 enum OutputLanguage: String, CaseIterable, Identifiable {
     case chinese
     case english
@@ -244,7 +238,7 @@ enum OutputLanguage: String, CaseIterable, Identifiable {
         }
     }
 
-    /// 该输出语言对应的输入语种（用于"源=目标"时自动纠正）；俄语没有对应输入，返回 nil。
+    /// 该输出语言对应的输入语种（用于"源=目标"时自动纠正）；阿拉伯语与俄语没有对应输入，返回 nil。
     var speechLanguage: SpeechLanguage? {
         switch self {
         case .chinese:  return .chinese
@@ -255,7 +249,7 @@ enum OutputLanguage: String, CaseIterable, Identifiable {
         case .german:   return .german
         case .spanish:  return .spanish
         case .italian:  return .italian
-        case .arabic:   return .arabic
+        case .arabic:   return nil
         case .russian:  return nil
         }
     }

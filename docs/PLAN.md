@@ -7,9 +7,10 @@
 
 - 目标设备：iPad Pro M5 / iPadOS 26（`SpeechAnalyzer` 要求 iOS 26；llama.cpp 的 xcframework 最低 iOS 16.4）。
 - 只做**语音 → 文本翻译**，不做语音合成（TTS）、不做悬浮字幕、不做双人对话分离。
-- 输入 8 种语言（中/英/日/韩/法/德/西/意）或「自动」（自动只跑中/英两路）；输出 9 种语言（多一个俄语）。
-  俄语之所以只做输出：iPadOS 26 的 `SpeechTranscriber.supportedLocales` 真机返回 31 个语言区，里面有 `it-IT`
-  但没有 `ru-RU`（见 `REALMACHINE-NOTES.md`），所以「说俄语」暂时做不了；「翻成俄语」只依赖模型，能做。
+- 输入 8 种语言（中/英/日/韩/法/德/西/意）或「自动」（自动只跑中/英两路）；输出 10 种语言（多阿拉伯语与俄语，均仅输出）。
+  阿拉伯语与俄语之所以只做输出：iPadOS 26 的 `SpeechTranscriber.supportedLocales` 真机返回 31 个语言区，里面没有 `ru-RU`；
+  `ar-SA` 虽在列表里，但真机下载语音资产会报 `transcription.ar asset not found after attemped download` 失败（见 `REALMACHINE-NOTES.md`）。
+  「翻成阿拉伯语 / 俄语」只依赖翻译模型，能稳定工作。
 - 全程离线：模型、推理、转写都在设备上；只有"首次下载模型 / 首次下载语音资产"需要网络。
 - 交付形态：未签名 ipa + Sideloadly 重签装机（免费 Apple ID，7 天有效）。
 
@@ -32,6 +33,7 @@
 | 13 | 输入/输出语言（v1.2.0） | 输入 8 种、输出 9 种（俄语仅输出） | 输入语言必须先在真机 `SpeechTranscriber.supportedLocales` 里确认：31 个语言区含 `it-IT`、不含 `ru-RU`。俄语输出只依赖翻译模型（官方 `LANG_NAMES` 里有 ru），所以单独放行输出 |
 | 14 | 「翻译需求」的 prompt 写法 | 走官方 **instTrans 约束格式**：自由文本按行渲染成 `【注意】…`，中文源→非英语时身份术语表仍是第一条【硬性要求】 | 官方 `inference/llm/call_api.py::build_prompt` 就是这么拼的（`--instruction` / `--glossary`），模型是按这个格式训练的；自定义 system prompt 没有依据。5 个内置场景文案见 `Sources/InstructionPresets.swift`，空需求时 prompt 与 v1.1.0 逐字节一致（`verify-prompts.yml` 卡着） |
 | 15 | 「翻译需求」的留/清策略 | 默认退出即清空；二级页面勾选「保存这次的需求，下次默认使用」才写 UserDefaults | issue #4 的原始要求；只影响 UI 状态，模型侧无状态。用「勾选才落盘」实现"退出清空"，不需要监听 App 生命周期（iOS 也不保证有退出回调） |
+| 16 | 输入/输出语言与占用上限（v1.3.0） | 输入维持 8 种、输出 10 种（阿拉伯语与俄语均仅输出）+ 5 语种 `AssetInventory` 一键释放 | 真机实测 `ar-SA` 虽在 `supportedLocales` 中，但下载资产报 `transcription.ar asset not found after attemped download`；因此正式版将阿拉伯语改为仅输出（RTL 右对齐排版）。同时真机触发 `AssetInventory` 5 语种上限，提供一键释放非中/英保留语种 |
 
 ## 2. 已证伪 / 已否决的路线
 
@@ -49,6 +51,7 @@
 | Cirrus CI（`ghcr.io/cirruslabs/macos-tahoe-xcode`） | ⏸ 备用 | GitHub Actions 因账号账单锁无法启动时准备过等价配置（同一个 macOS 26 + Xcode 26 镜像），账单修复后删除了 |
 | 把 `.gguf` 打进 ipa | ❌ 否决 | 1.22 GB 会让 Sideloadly 每次重签都变成几分钟，且换模型要重新出包 |
 | 用 `SpeechTranscriber` 做俄语输入 | ❌ 当前系统不支持 | 真机 `supportedLocales` 31 个语言区里没有 `ru-RU`（有 `it-IT`）。`supportedLocale(equivalentTo:)` 单独调用会返回 `ru_RU`，但只代表"语言等价"，不代表装了模型——必须看 `supportedLocales` 数组本身 |
+| 用 `SpeechTranscriber` 做阿拉伯语输入 | ❌ 真机下载资产失败 | `ar-SA` 虽在真机 `supportedLocales` 里，但 `v1.3.0-beta.2` 实测启动识别下载资产报 `transcription.ar asset not found after attemped download`，因此正式版 `v1.3.0` 将阿拉伯语改为仅输出 |
 | 用 `DictationTranscriber` 兜底俄语输入 | ⏸ 本轮不做（可行路线） | Apple 的「听写」引擎与 `SFSpeechRecognizer` 离线模型同源，社区项目（swift-speech-lanes）在真机上验证过 `ru-RU` 走 `DictationTranscriber`。本轮按用户选择只做俄语输出；要做时把 `SpeechAnalyzerASR` 的 transcriber 泛化成 Speech/Dictation 两种（`SpeechModule` 协议一致），需真机验证 |
 
 ## 3. 分层
@@ -97,6 +100,14 @@ Core.swift ──────────── 语言枚举、ASREvent、ASREng
 - [ ] TestFlight 分发（需要 $99/年，免掉 7 天重签）
 - [ ] 连续字幕模式（长听 + 逐句滚动，而不是点一次翻一句）
 - [ ] MLX Swift 版本做性能对照（只有在 llama.cpp 速度不达标时才值得做）
+
+### v1.3.0（2026-11-26，正式版）
+
+- [x] 阿拉伯语输出 + RTL 从右到左排版（`SpeechLanguage.containsArabic` + `DirectionalBlockModifier`）；真机实测 `ar-SA` 资产下载报 `transcription.ar asset not found after attemped download`，正式版将阿拉伯语设为仅输出（与俄语一致），输入维持 8 种、输出共 10 种
+- [x] 深色模式跟随系统外观（移除强制 `.preferredColorScheme(.light)`，使用系统语义色）
+- [x] 长句连续输出自动滚到底部（`ScrollViewReader` + 底部锚点 + `TranslationContentHeightKey`）
+- [x] 识别语言占用上限管理：`AssetInventory` 最多保留 5 个语言，ⓘ 面板常驻占用显示与「一键清除其他语言」（保留中/英），报错横幅就地提供一键清除入口
+- [x] `verify-prompts.yml`：Swift `PromptBuilder` 与 Python 镜像 476 条 case 逐字节比对
 
 ### v1.2.0（2026-11-23，正式版）
 

@@ -57,7 +57,7 @@ Sideloadly 本身不带驱动，它依赖 Apple 的移动设备驱动（usbmuxd 
 两个来源，内容一样：
 
 1. **GitHub Releases（推荐）**：<https://github.com/Baizhi-Angelica/IndexTranslate_iPadM5/releases>
-   下载最新的 `index-translate-v1.2.0-unsigned.ipa`（约 5–10 MB；旧版是 `index-translate-v1.1.0-unsigned.ipa`）
+   下载最新的 `index-translate-v1.3.0-unsigned.ipa`（约 5–10 MB；旧版是 `index-translate-v1.2.0-unsigned.ipa`）
 2. 仓库里的 `release/ITXTranslate-unsigned.ipa`（这是旧构建的固定文件名）
 
 这个包是**未签名**的，下一步用你的 Apple ID 重签。

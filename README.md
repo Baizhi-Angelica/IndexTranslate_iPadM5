@@ -9,7 +9,7 @@
 ![model](https://img.shields.io/badge/model-Apache--2.0-blue)
 ![runtime](https://img.shields.io/badge/runtime-llama.cpp-orange)
 ![ui](https://img.shields.io/badge/ui-SwiftUI-purple)
-![release](https://img.shields.io/badge/release-v1.2.0-brightgreen)
+![release](https://img.shields.io/badge/release-v1.3.0-brightgreen)
 
 <img src="docs/images/translation.jpg" width="32%"> <img src="docs/images/listening.jpg" width="32%"> <img src="docs/images/model-picker.jpg" width="32%">
 
@@ -26,10 +26,11 @@
 | | 特性 | 说明 |
 |---|---|---|
 | 🎙 | 设备端流式转写 | `SpeechAnalyzer` + `SpeechTranscriber`（iPadOS 26）；系统自带 31 个语言区的识别资源，App 按你选的输入语言启用对应的识别器 |
-| 🌐 | 输入 9 种语言 / 自动 | 中文、English、日本語、한국어、Français、Deutsch、Español、Italiano、العربية，外加「自动」（zh-CN + en-US 两路，按转写文字判定；默认只听中文，双识别器是 ⓘ 里的实验开关） |
-| 🗣 | 输出 10 种语言 | 中文、英语、日语、韩语、法语、德语、西班牙语、意大利语、阿拉伯语、**俄语**（俄语目前只做输出：系统识别器还没有俄语模型） |
-| ↔️ | 阿拉伯语从右到左 | 阿拉伯文的译文 / 原文 / 实时转写自动右对齐、按 RTL 排版（v1.3.0） |
+| 🌐 | 输入 8 种语言 / 自动 | 中文、English、日本語、한국어、Français、Deutsch、Español、Italiano，外加「自动」（zh-CN + en-US 两路，按转写文字判定；默认只听中文，双识别器是 ⓘ 里的实验开关） |
+| 🗣 | 输出 10 种语言 | 中文、英语、日语、韩语、法语、德语、西班牙语、意大利语、**阿拉伯语**、**俄语**（阿拉伯语与俄语目前只做输出，原因见「已知限制」） |
+| ↔️ | 阿拉伯语从右到左 | 阿拉伯文的译文与原文自动右对齐、按 RTL 排版（v1.3.0） |
 | 🌙 | 深色模式 | 跟随系统浅色 / 深色外观自动切换（v1.3.0） |
+| 🧹 | 识别语言占用一键清除 | 系统最多保留 5 个语音识别语种，满了可在报错横幅或 ⓘ 面板一键释放非中/英语种（v1.3.0） |
 | 🎯 | 翻译需求 | ⓘ 里选场景（严肃会议 / 朋友小聚 / 初见新朋友 / 旅行中求助 / 陌生人随便聊聊）或自己写要求，按官方 instTrans 格式加一条【注意】约束；默认退出即清空，可勾选「保存这次的需求，下次默认使用」 |
 | 📝 | 英文词原样保留 | 中文夹英文时用身份术语表硬约束，`dining hall` / `deadline` / `API` 不会被改写 |
 | 📜 | 连续字幕 | 上一句（灰）+ 当前句（黑），另有一行「正在听」实时显示还没定稿的内容 |
@@ -46,7 +47,13 @@
 |---|---|---|
 | <img src="docs/images/translation.jpg" width="100%"> | <img src="docs/images/listening.jpg" width="100%"> | <img src="docs/images/model-picker.jpg" width="100%"> |
 
-输入语言现在有 8 种，下面两张是上一版新增语言的实拍（iPad Pro M5，本地模型，无网络）：
+v1.3.0 新增阿拉伯语输出（RTL 从右到左排版）与长句自动滚底，真机实拍（iPad Pro M5，本地模型，无网络）：
+
+| 输入 中文 → 输出 العربية（RTL 排版 + 长句自动滚底） |
+|---|
+| <img src="docs/images/output-arabic.jpg" width="60%"> |
+
+输入语言共有 8 种，下面两张是输入语言的实拍（iPad Pro M5，本地模型，无网络）：
 
 | 输入 English → 输出 日本語 | 输入 Français → 输出 中文 |
 |---|---|
@@ -56,7 +63,7 @@
 
 > 目标是"没有 Mac、只有 Windows 电脑 + 一台 iPad"也能装好。完整版（含排障）见 **[docs/INSTALL-IPAD.md](docs/INSTALL-IPAD.md)**。
 
-1. **拿到 ipa**：从 [Releases](https://github.com/Baizhi-Angelica/IndexTranslate_iPadM5/releases) 下载最新的 `index-translate-v1.2.0-unsigned.ipa`。这是**未签名**包，下一步用你的 Apple ID 重签。
+1. **拿到 ipa**：从 [Releases](https://github.com/Baizhi-Angelica/IndexTranslate_iPadM5/releases) 下载最新的 `index-translate-v1.3.0-unsigned.ipa`。这是**未签名**包，下一步用你的 Apple ID 重签。
 2. **装进 iPad**：先从 **Apple 官网**装 [iTunes（Windows）](https://www.apple.com/itunes/download/win64) 或 [iCloud for Windows](https://support.apple.com/zh-cn/downloads)（两者都会装 Apple 设备驱动），再从 <https://sideloadly.io/> 装 Sideloadly；连上 iPad → 填 Apple ID → 拖入 ipa → Start。首次需要在 iPad 的「设置 → 隐私与安全性 → 开发者模式」里打开开发者模式并重启。
 3. **放模型**：二选一——① 打开 App，在模型卡片里点「下载 Q4_K_M / Q8_0」（**优先 ModelScope 国内直连**，失败自动换 `hf-mirror.com` → `huggingface.co`）；② **手动下载**：Safari 打开 [ModelScope 模型页](https://www.modelscope.cn/models/IndexTeam/Index-Translate-2B-GGUF) → 点 `Index-Translate-2B.Q4_K_M.gguf` 或 `Q8_0` → 在「文件」App 里把它拖进 **我的 iPad → index-translate**，回到 App 会自动发现。
 4. **授权并说话**：允许麦克风 → 选输入语言和输出语言 → 点大圆麦克风按钮 → 说一句中文或英文，定稿后自动翻译。
@@ -87,7 +94,7 @@
 
 ## 使用说明
 
-- **输入**：中文 / English / 日本語 / 한국어 / Français / Deutsch / Español / Italiano / العربية / 自动。自动模式默认只启用中文识别器（英文词仍能被中文识别器捕捉）；想要中英两路同时识别，在 ⓘ 里打开「自动模式双识别器（实验）」，改动在下次开始聆听时生效。首次用某个语言时系统会下载该语言的识别资源（几十 MB，联网一次）。
+- **输入**：中文 / English / 日本語 / 한국어 / Français / Deutsch / Español / Italiano / 自动。自动模式默认只启用中文识别器（英文词仍能被中文识别器捕捉）；想要中英两路同时识别，在 ⓘ 里打开「自动模式双识别器（实验）」，改动在下次开始聆听时生效。首次用某个语言时系统会下载该语言的识别资源（几十 MB，联网一次）。
 - **输出**：中文、英语、日语、韩语、法语、德语、西班牙语、意大利语、阿拉伯语、俄语。若输出语言与输入语言相同，会自动切到对应的另一方（中文↔英文，其它源语言默认翻中文）。
 - **翻译需求**：点 ⓘ →「翻译需求」，选一个场景（严肃会议 / 朋友小聚 / 初见新朋友 / 旅行中求助 / 陌生人随便聊聊）或者自己写一句。它会按官方 instTrans 格式作为【注意】约束加进每句提示词；中文→非英语时，身份术语表仍是最前面的【硬性要求】。默认**退出 App 即清空**；想下次还用，勾选底部的「保存这次的需求，下次默认使用」。
 - **字幕**：上方大字是当前句译文，中间灰色是上一句译文（同字号、变灰），底部另有「正在听」行显示还没定稿的识别结果；听不懂时那一行会一直变。
@@ -140,7 +147,8 @@ xcodebuild -project ITXTranslate.xcodeproj -scheme ITXTranslate \
 - **单会话上下文不跨句**：每句独立翻译（每句清 KV），不参考上一句的语境；同一句里的代词可能缺上下文。
 - **免费 Apple ID 7 天重签**：到期重签一次，模型与设置保留。
 - 自动模式的「双识别器」是实验功能，开启后资源占用更高。
-- **俄语只能作为输出**：iPadOS 26 的 `SpeechTranscriber` 支持 31 个语言区，里面有意大利语但没有俄语，所以还不能「说俄语 → 翻成中文」。等 Apple 提供俄语识别模型后只要加一行 locale 就能补上。
+- **阿拉伯语与俄语只能作为输出**：iPadOS 26 的 `SpeechTranscriber.supportedLocales` 支持 31 个语言区，里面没有 `ru-RU`；`ar-SA` 虽在列表里，但真机下载语音资产会报 `transcription.ar asset not found after attemped download` 失败。因此当前版本两者仅做译文输出（阿拉伯语译文自动 RTL 右对齐排版）。
+- **系统语音识别语言最多同时占用 5 个**：iPadOS 26 的 `AssetInventory` 上限为 5 个保留语种；切换多个输入语言装满后会出现占用上限提示，可点错误横幅右侧或 ⓘ 面板里的「一键清除其他语言」（保留中/英，其余释放，下次用时重新下载）。
 - **翻译需求是软约束**：模型会尽量遵守语气要求，但不是硬保证；同一套场景文案已经过提示词回归，不改变默认路径的任何行为。
 
 ## 常见问题
