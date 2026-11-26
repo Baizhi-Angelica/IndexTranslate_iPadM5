@@ -287,3 +287,25 @@ Windows CPU 上平均延迟 +约 110 ms；真机 prefill 44,000 tok/s，折算�
    需要把 `SpeechAnalyzerASR` 的 transcriber 泛化成 Speech/Dictation 两种（都 conform `SpeechModule`）。
 2. SHA-256 校验 / 断点续传（v1.1.0 遗留）。
 3. 术语表可编辑（和「翻译需求」共用 UI 形态）。
+
+---
+
+## 12. 2026-11-26：v1.3.0-beta.1（阿拉伯语 / 深色模式 / 长句滚动修复）
+
+- **阿拉伯语输入 + 输出**：`ar-SA` 已在真机 `supportedLocales` 的 31 个语言区里（见 `REALMACHINE-NOTES.md`）；prompt 语言名用官方的「阿拉伯语」。
+  `SpeechLanguage.containsArabic` 判断文字方向；`DirectionalBlockModifier` 让阿拉伯文那几行按 RTL 排版、右对齐。
+  分句拼接：除中文 / 日语外，其它源语言（含阿拉伯语、韩语）在定稿片段之间都加空格。
+- **深色模式**：去掉了 `.preferredColorScheme(.light)`，背景 / 卡片换成系统语义色（`systemBackground` / `secondarySystemBackground` 等），深色下浅色填充的透明度调高了一点。
+- **长句滚动**：译文区包了 `ScrollViewReader`，最后放一个底部锚点；内容高度变化（`TranslationContentHeightKey`）或文字变化后等一帧 + 35 ms 再 `scrollTo(.bottom)`，修复「两句都很长时停在倒数位置、看不到最新一句原文小字」。
+- 验证：`build-26` CI 编译 + bundle check、`verify prompt bytes`（510 条 case，含阿拉伯语源 / 目标）都通过；ipa 内 `CFBundleShortVersionString=1.3.0`、`CFBundleVersion=5`。
+
+### 没验证的地方
+
+- **没跑 `tools/regress_prompts.py` 的阿拉伯语模型回归**（Windows CPU 上的译文质量 / 英文词保留率都没有数字）。
+- 真机没测：阿拉伯语识别资源首次下载、RTL 排版观感、深色模式下各卡片对比度、自动滚动在手动上拉看旧内容时会不会把你拽回底部。
+
+### 发版流程备忘（重要）
+
+`build-*` 预发布是 CI 自动产物，ipa 固定叫 `ITXTranslate-unsigned.ipa`。**给用户测试的版本要另外手动发**：
+下载 CI 产物 → 核对 `Info.plist` 版本号 → 改名为 `index-translate-vX.Y.Z[-beta.N]-unsigned.ipa` →
+`gh release create vX.Y.Z[-beta.N] --prerelease` 并写 release notes（参考 `v1.2.0-beta.1`）。

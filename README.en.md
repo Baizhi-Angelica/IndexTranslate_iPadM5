@@ -30,8 +30,10 @@ The model is [IndexTeam / bilibili's Index-Translate-2B](https://huggingface.co/
 | | Feature | Detail |
 |---|---|---|
 | 🎙 | On-device streaming transcription | `SpeechAnalyzer` + `SpeechTranscriber` (iPadOS 26); the system ships 31 locales, the app uses the recognizer for the input language you pick |
-| 🌐 | Input: 8 languages, or Auto | Chinese, English, Japanese, Korean, French, German, Spanish, Italian, plus "Auto" (Chinese recognizer by default; the dual-recognizer mode is an experimental switch in the ⓘ panel) |
-| 🗣 | Output: 9 languages | Chinese, English, Japanese, Korean, French, German, Spanish, Italian, **Russian** (output only — Apple's transcriber has no Russian model yet) |
+| 🌐 | Input: 9 languages, or Auto | Chinese, English, Japanese, Korean, French, German, Spanish, Italian, Arabic, plus "Auto" (Chinese recognizer by default; the dual-recognizer mode is an experimental switch in the ⓘ panel) |
+| 🗣 | Output: 10 languages | Chinese, English, Japanese, Korean, French, German, Spanish, Italian, Arabic, **Russian** (output only — Apple's transcriber has no Russian model yet) |
+| ↔️ | Right-to-left Arabic | Arabic translation / source / live transcript lines are right-aligned and laid out RTL (v1.3.0) |
+| 🌙 | Dark mode | Follows the system light / dark appearance (v1.3.0) |
 | 🎯 | Translation style | In ⓘ → "Translation style", pick a scene (formal meeting / casual friends / first meeting / asking for help while travelling / small talk) or write your own. It is appended as an instTrans-style 【注意】 constraint; cleared on exit by default, or tick "save for next launch" |
 | 📝 | English terms kept verbatim | Identity glossary hard constraint, so `dining hall` / `deadline` / `API` are not paraphrased |
 | 📜 | Continuous subtitles | Previous sentence (grey) + current sentence (black), plus a live "listening" line |
@@ -72,8 +74,8 @@ Put the file in **Files → On My iPad → index-translate** (keep the filename)
 
 ## Usage
 
-- **Input**: Chinese / English / Japanese / Korean / French / German / Spanish / Italian / Auto. Auto runs the Chinese recognizer only unless you enable "dual recognizer (experimental)" in ⓘ; changes take effect on the next listening session. The first use of a language downloads its system speech assets (tens of MB, once).
-- **Output**: Chinese, English, Japanese, Korean, French, German, Spanish, Italian, Russian. If it equals the input language, the app switches to the other side of the Chinese↔English pair (other sources default to Chinese).
+- **Input**: Chinese / English / Japanese / Korean / French / German / Spanish / Italian / Arabic / Auto. Auto runs the Chinese recognizer only unless you enable "dual recognizer (experimental)" in ⓘ; changes take effect on the next listening session. The first use of a language downloads its system speech assets (tens of MB, once).
+- **Output**: Chinese, English, Japanese, Korean, French, German, Spanish, Italian, Arabic, Russian. If it equals the input language, the app switches to the other side of the Chinese↔English pair (other sources default to Chinese).
 - **Translation style**: ⓘ → "Translation style" opens a second page with five scenes and a free-form field. It is rendered as an instTrans-style 【注意】 constraint (the identity glossary stays the first 【硬性要求】 for Chinese→non-English). Cleared when the app exits unless you tick "save for next launch".
 - **Subtitles**: current translation large, previous translation grey, plus a live line for not-yet-final text.
 - **Level meter**: the ring around the mic button follows your voice.

@@ -879,7 +879,7 @@ private struct InfoSheet: View {
                     Text("关于这个项目")
                         .font(.system(size: 17, weight: .semibold))
                         .foregroundStyle(Color.primary)
-                    Text("v1.2.0 新增：ⓘ →「翻译需求」（场景 / 自定义要求，可勾选记住到下次启动）、意大利语输入输出、俄语输出。")
+                    Text("v1.3.0 新增：阿拉伯语输入输出（从右到左排版）、深色模式跟随系统、长句连续输出时自动滚到最底（能看到最新一句的原文小字）。\nv1.2.0：ⓘ →「翻译需求」（场景 / 自定义要求，可勾选记住到下次启动）、意大利语输入输出、俄语输出。")
                         .font(.system(size: 13))
                         .foregroundStyle(Color.secondary)
                         .fixedSize(horizontal: false, vertical: true)
